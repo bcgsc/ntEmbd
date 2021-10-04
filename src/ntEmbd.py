@@ -86,6 +86,12 @@ def main():
     parser_train.add_argument('-f', '--filename', help='Choose a prefix for model names', type=str)
     parser_train.add_argument('--no_mask_zero', help='Disable masking step for zero padded sequences', action='store_false', default=True)
 
+    parser_read = subparsers.add_parser('read', help="Run the ntEmbd on the read mode")
+    parser_read.add_argument('-i' '--input', help="Input sequences in FASTA/FASTQ format to parse", required=True)
+    parser_read.add_argument('-l', '--label', help="Label to be used for the input sequences", required=True)
+    parser_read.add_argument('-o', '--output', help="The output directory/name to save parsed input file", required=True)
+
+
 
     args = parser.parse_args()
 
