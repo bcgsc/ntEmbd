@@ -87,8 +87,8 @@ def main():
     parser_train.add_argument('-l', '--maxlen', help='The maximum length of input sequences', default=1000, type=int)
     parser_train.add_argument('-e', '--epoch', help='The number of epochs', default=100, type=int)
     parser_train.add_argument('-p', '--pad', help='Choose between "pre" and "post" padding', default="pre", type=str)
-    parser_train.add_argument('-f', '--filename', help='Choose a prefix for model names', type=str)
     parser_train.add_argument('--no_mask_zero', help='Disable masking step for zero padded sequences', action='store_false', default=True)
+    parser_train.add_argument('-o', '--output', help="The output directory/name to save trained model", required=True)
 
     parser_read = subparsers.add_parser('read', help="Run the ntEmbd on the read mode")
     parser_read.add_argument('-i' '--input', help="Input sequences in FASTA/FASTQ format to parse", required=True)
@@ -161,7 +161,8 @@ def main():
         maxlen = args.maxlen
         mask = args.no_mask_zero
         pad = args.pad
-        filename = args.filename
+        output_dir = args.output
+
 
         print("\nrunning the ntEmbd (train mode) with following parameters\n")
         print("number of neurons", num_nn)
@@ -169,8 +170,8 @@ def main():
         print("epoch", epoch)
         print("zero masking", mask)
         print("Padding", pad)
+        print("Output", output_dir)
 
-        full_name = filename + "_ntEmbd_notrun_" + pad + "pad_es_maxlen" + str(maxlen) + "_nn_" + str(num_nn) + "_mask_" + str(mask)
 
         X_train = np.load(train_numpy)
         X_test = np.load(test_numpy)
@@ -184,7 +185,7 @@ def main():
         ])
 
         es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=10)
-        mc = ModelCheckpoint("/projects/btl/shafez/projects/ANNote/analysis/lstm_autoencoder/ntEmbd_models/" + full_name + "_best", verbose=1, monitor='val_accuracy', mode='max', save_best_only=True)
+        mc = ModelCheckpoint(output_dir + "_bestmodelcheckpoint", verbose=1, monitor='val_accuracy', mode='max', save_best_only=True)
 
         model.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
 
@@ -199,9 +200,9 @@ def main():
         layer_output_test = intermediate_layer_model.predict(X_test)
 
 
-        model.save("/projects/btl/shafez/projects/ANNote/analysis/lstm_autoencoder/ntEmbd_models/" + full_name)
-        np.savetxt("/projects/btl/shafez/projects/ANNote/analysis/lstm_autoencoder/embeddings/" + full_name + "_train", layer_output_train)
-        np.savetxt("/projects/btl/shafez/projects/ANNote/analysis/lstm_autoencoder/embeddings/" + full_name + "_test", layer_output_test)
+        model.save(output_dir)
+        np.savetxt(output_dir + "_train", layer_output_train)
+        np.savetxt(output_dir + "_test", layer_output_test)
         sys.stdout.write(strftime("%Y-%m-%d %H:%M:%S") + ": Finished!\n")
         return
 
