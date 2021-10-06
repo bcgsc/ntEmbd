@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from numpy import savetxt
 import argparse
 import os
 import sys
@@ -9,6 +10,9 @@ from textwrap import dedent
 from time import strftime
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from matplotlib import pyplot
+from sklearn.utils import shuffle
+import pandas as pd
+
 
 
 PYTHON_VERSION = sys.version_info
@@ -98,6 +102,52 @@ def main():
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
+
+    if args.mode == "read":
+        input_file = args.input
+        label = args.label
+        output_dir = args.output
+
+        read_lengths = []
+        read_seqs = []
+        read_labels = []
+
+        with open(input_file, 'rt') as f:
+            for seqN, seqS, seqQ in readfq(f):
+                read_lengths.append(len(seqS))
+                read_seqs.append(seqS.upper())
+                read_labels.append(label)
+
+        #to be used for visualization and stat reports
+        input_data = pd.DataFrame(
+            {'label': read_labels,
+             'length': read_lengths
+             })
+
+        input_data_indices = [i for i in range(len(read_lengths)) if read_lengths[i] <= maxlen]
+        read_labels_processed = np.full((len(input_data_indices), 1), label)
+
+        input_data_processed = []
+        input_data_processed_text = []
+        for i in input_data_indices:
+            current = np.array(list(read_seqs[i])).reshape(-1, 1)
+            current = np.where(current == 'A', 1, current)
+            current = np.where(current == 'T', 2, current)
+            current = np.where(current == 'C', 3, current)
+            current = np.where(current == 'G', 4, current)
+            current = np.where(current == 'N', 5, current)
+            current = np.where(current == 'W', 5, current)
+            current = current.astype('int')
+            input_data_processed.append(current)
+            input_data_processed_text.append(read_seqs[i])
+
+        input_data_padded = tf.keras.preprocessing.sequence.pad_sequences(input_data_processed, padding=pad, maxlen=maxlen, dtype='int32', value=0.0)
+
+        input_data_padded_shuffled = shuffle(input_data_padded, random_state=42)
+
+        np.save(output_dir + "seqs", input_data_padded_shuffled)
+        np.save(output_dir + "_labels", read_labels_processed)
+
 
     if args.mode == "train":
         train_numpy = args.train
