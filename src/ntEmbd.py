@@ -94,6 +94,8 @@ def main():
     parser_read.add_argument('-i' '--input', help="Input sequences in FASTA/FASTQ format to parse", required=True)
     parser_read.add_argument('-l', '--label', help="Label to be used for the input sequences", required=True)
     parser_read.add_argument('-o', '--output', help="The output directory/name to save parsed input file", required=True)
+    parser_read.add_argument('-p', '--pad', help=' Choose between "pre" and "post" padding', default="pre", type=str)
+    parser_read.add_argument('-l', '--maxlen', help='The maximum length of input sequences', default=1000, type=int)
 
 
 
@@ -107,6 +109,8 @@ def main():
         input_file = args.input
         label = args.label
         output_dir = args.output
+        maxlen = args.maxlen
+        pad = args.pad
 
         read_lengths = []
         read_seqs = []
