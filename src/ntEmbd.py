@@ -112,6 +112,13 @@ def main():
         maxlen = args.maxlen
         pad = args.pad
 
+        print("\nrunning the ntEmbd (read mode) with following parameters\n")
+        print("input file", input_file)
+        print("label", label)
+        print("max sequence length", maxlen)
+        print("Padding", pad)
+        print("Output", output_dir)
+
         read_lengths = []
         read_seqs = []
         read_labels = []
