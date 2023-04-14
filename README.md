@@ -1,3 +1,5 @@
+<img src="https://github.com/bcgsc/ntEmbd/blob/master/ntEmbd_logo.png" width="300">
+
 # ntEmbd
 Deep learning embedding for nucleotide sequences
 
