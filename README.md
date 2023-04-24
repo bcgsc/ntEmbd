@@ -1,4 +1,4 @@
-# ntEmbd: Deep learning Embedding for Nucleotide Sequences
+# ntEmbd: Deep Learning Embedding for Nucleotide Sequences
 
 ![Embeddy](assets/ntEmbd_logo_mascot.png)
 <br/>*“Transforming Sequences. Transforming Insight.” — [Embeddy - the Mascot](https://www.saberhq.com/blog/ntembd)*
