@@ -91,10 +91,11 @@ def main():
     parser_train.add_argument('-o', '--output', help="The output directory/name to save trained model", required=True)
 
     parser_read = subparsers.add_parser('read', help="Run the ntEmbd on the read mode")
-    parser_read.add_argument('-i' '--input', help="Input sequences in FASTA/FASTQ format to parse", required=True)
-    parser_read.add_argument('-l', '--label', help="Label to be used for the input sequences", required=True)
+    parser_read.add_argument('-i', '--input', help="Input sequences in FASTA/FASTQ format to parse", required=True)
+    parser_read.add_argument('-y', '--label', help="Label to be used for the input sequences", required=True)
     parser_read.add_argument('-o', '--output', help="The output directory/name to save parsed input file", required=True)
-    parser_read.add_argument('-p', '--pad', help=' Choose between "pre" and "post" padding', default="pre", type=str)
+    parser_read.add_argument('--no_padding', help="", action='store_false', default=True)
+    parser_read.add_argument('-p', '--padpos', help=' Choose between "pre" and "post" padding', default="pre", type=str)
     parser_read.add_argument('-l', '--maxlen', help='The maximum length of input sequences', default=1000, type=int)
 
 
@@ -110,7 +111,8 @@ def main():
         label = args.label
         output_dir = args.output
         maxlen = args.maxlen
-        pad = args.pad
+        pad = args.no_padding
+        padpos = args.padpos
 
         print("\nrunning the ntEmbd (read mode) with following parameters\n")
         print("input file", input_file)
@@ -118,6 +120,8 @@ def main():
         print("max sequence length", maxlen)
         print("Padding", pad)
         print("Output", output_dir)
+        if not pad:
+            print("Padding position", padpos)
 
         read_lengths = []
         read_seqs = []
@@ -152,11 +156,15 @@ def main():
             input_data_processed.append(current)
             input_data_processed_text.append(read_seqs[i])
 
-        input_data_padded = tf.keras.preprocessing.sequence.pad_sequences(input_data_processed, padding=pad, maxlen=maxlen, dtype='int32', value=0.0)
+        if not pad:
+            input_data_final = tf.keras.preprocessing.sequence.pad_sequences(input_data_processed, padding=pad, maxlen=maxlen, dtype='int32', value=0.0)
+        else:
+            #here I need to ignore padding and just output the numpy array of each sequence.
+            input_data_final = np.array(input_data_processed)
 
-        input_data_padded_shuffled = shuffle(input_data_padded, random_state=42)
+        input_data_final_shuffled = shuffle(input_data_final, random_state=42)
 
-        np.save(output_dir + "seqs", input_data_padded_shuffled)
+        np.save(output_dir + "_seqs", input_data_final_shuffled)
         np.save(output_dir + "_labels", read_labels_processed)
 
 
