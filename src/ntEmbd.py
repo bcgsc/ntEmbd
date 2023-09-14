@@ -25,7 +25,6 @@ def reset_seeds(seed):
     np.random.seed(seed)
     tf.random.set_seed(seed)
 
-
 # Taken from https://github.com/lh3/readfq
 def readfq(fp):  # this is a generator function
     last = None  # this is a buffer keeping the last unprocessed line
@@ -576,16 +575,18 @@ def main():
         # Write the model summary to a file in the log directory
         with open(log_dir + "model_summary.txt", "w") as f:
             autoencoder.summary(print_fn=lambda x: f.write(x + '\n'))
-
+        
+        # Train the model using the whole training set and validate using the separate validation set
+        train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
+        val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
+        
         # Introduce early stopping and model checkpoints
         if args.early_stopping:
             early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
             model_checkpoint = tf.keras.callbacks.ModelCheckpoint(save_dir + 'best_model.h5', monitor='val_loss', save_best_only=True)
-
-        # Train the model using the whole training set and validate using the separate validation set
-        train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
-        val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
-        history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
+            history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
+        else:
+            history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
         
         # Plot the training history and save it to a file in the log directory
         with open(log_dir + "training_history.txt", "w") as f:
