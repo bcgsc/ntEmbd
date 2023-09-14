@@ -1,32 +1,30 @@
-import tensorflow as tf
-import numpy as np
-from numpy import savetxt
 import argparse
 import os
 import sys
-import random as python_random
-from keras.models import Model
-from textwrap import dedent
-from time import strftime
-from keras.callbacks import EarlyStopping, ModelCheckpoint
-from matplotlib import pyplot
-from sklearn.utils import shuffle
-import pandas as pd
-
+import random
+from sklearn.model_selection import train_test_split, KFold
+import numpy as np
+import tensorflow.keras.backend as K
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, LSTM, Bidirectional, RepeatVector, TimeDistributed, Dropout
+import tensorflow as tf
+import optuna
+from collections import Counter
+import matplotlib.pyplot as plt
 
 
 PYTHON_VERSION = sys.version_info
-VERSION = "0.0.1"
+VERSION = "0.9"
 PRORAM = "ntEmbd"
 AUTHOR = "Saber Hafezqorani (UBC & BCGSC)"
 CONTACT = "shafezqorani@bcgsc.ca"
 
-def reset_seeds():
-   np.random.seed(124)
-   python_random.seed(124)
-   tf.random.set_seed(124)
+# A function to set the random seed for reproducibility
+def reset_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
 
-reset_seeds()
 
 # Taken from https://github.com/lh3/readfq
 def readfq(fp):  # this is a generator function
@@ -62,43 +60,371 @@ def readfq(fp):  # this is a generator function
                 yield name, seq, None  # yield a fasta record instead
                 break
 
+# Angular distance of two unit vectors with positive values - this one is experimental (for testing)
+def angular_distance(vector_a, vector_b):
+    """
+    Calculate the angular distance between two vectors.
+
+    Parameters:
+    - vector_a, vector_b: Numpy arrays representing the two vectors.
+
+    Returns:
+    - Angular distance between the two vectors.
+    """
+
+    # Calculate the dot product of the two vectors
+    dot_product = np.dot(vector_a, vector_b)
+
+    # Calculate the magnitudes (norms) of the two vectors
+    norm_a = np.linalg.norm(vector_a)
+    norm_b = np.linalg.norm(vector_b)
+
+    # Calculate the cosine of the angle between the two vectors
+    cosine_angle = dot_product / (norm_a * norm_b)
+
+    # Ensure the value lies in the domain of arccos (-1 to 1) due to potential floating-point inaccuracies
+    cosine_angle = np.clip(cosine_angle, -1.0, 1.0)
+
+    # Calculate the angular distance
+    angle = np.arccos(cosine_angle)
+
+    return angle
+
+# Angular distance of two unit vectors with positive values - using TensorFlow operations
+def angular_distance_tf(vector_a, vector_b):
+    """
+    Calculate the angular distance between two vectors using TensorFlow operations.
+
+    Parameters:
+    - vector_a, vector_b: TensorFlow tensors representing the two vectors.
+
+    Returns:
+    - Angular distance between the two vectors.
+    """
+
+    # Ensure the vectors are of type float32
+    vector_a = tf.cast(vector_a, tf.float32)
+    vector_b = tf.cast(vector_b, tf.float32)
+
+    # Calculate the dot product of the two vectors
+    dot_product = tf.reduce_sum(tf.multiply(vector_a, vector_b))
+
+    # Calculate the magnitudes (norms) of the two vectors
+    norm_a = tf.norm(vector_a)
+    norm_b = tf.norm(vector_b)
+
+    # Calculate the cosine of the angle between the two vectors
+    cosine_angle = dot_product / (norm_a * norm_b)
+
+    # Ensure the value lies in the domain of arccos (-1 to 1) due to potential floating-point inaccuracies
+    cosine_angle = tf.clip_by_value(cosine_angle, -1.0, 1.0)
+
+    # Calculate the angular distance
+    angle = tf.acos(cosine_angle)
+
+    return angle
+
+# IUPAC encoding for nucleotide sequences
+def iupac_encoding(seq):
+    """
+    One-hot encode an RNA sequence using IUPAC symbols in a binary format.
+
+    Parameters:
+    - sequence: RNA sequence string
+
+    Returns:
+    - Numpy array with one-hot encoded sequence
+    """
+
+    # Define the 4-bit encoding dictionary for IUPAC symbols
+    encoding_dict = {
+        'A': [1, 0, 0, 0],
+        'C': [0, 1, 0, 0],
+        'G': [0, 0, 1, 0],
+        'T': [0, 0, 0, 1],
+        'U': [0, 0, 0, 1],
+        'W': [1, 0, 0, 1],
+        'S': [0, 1, 1, 0],
+        'M': [1, 1, 0, 0],
+        'K': [0, 0, 1, 1],
+        'R': [1, 0, 1, 0],
+        'Y': [0, 1, 0, 1],
+        'B': [0, 1, 1, 1],
+        'D': [1, 0, 1, 1],
+        'H': [1, 1, 0, 1],
+        'V': [1, 1, 1, 0],
+        'N': [1, 1, 1, 1],
+        'Z': [0, 0, 0, 0]
+    }
+
+    # Encode the sequence using the dictionary
+    encoded_sequence = [encoding_dict[base] for base in seq]
+    return np.array(encoded_sequence)
+
+# pre-process sequences for training
+def process_sequences(sequences, max_length, truncate_long_sequences, pad_position, padding_value=(-1, -1, -1, -1)):
+    """
+    Process raw sequences: filter based on length, encode, and then pad/truncate.
+
+    Parameters:
+    - sequences: List of raw sequences (strings)
+    - max_length: The desired length for each sequence after padding/truncating
+    - truncate_long_sequences: Whether to truncate sequences longer than max_length
+    - padding_value: The value used for padding (default is [-1, -1, -1, -1])
+    - pad_position: Whether to pad/truncate at the start ("pre") or end ("post") of the sequence
+
+    Returns:
+    - List of processed sequences
+    """
+
+    processed_sequences = []
+
+    for seq in sequences:
+        if len(seq) > max_length:
+            if truncate_long_sequences == "truncate_end":
+                seq = seq[:max_length]
+            elif truncate_long_sequences == "truncate_start":
+                seq = seq[-max_length:]
+            else:
+                continue  # Skip truncation and ignore this sequence
+        else:
+            if pad_position not in ["pre", "post"]:
+                continue # Skip padding and ignore this sequence
+        
+        # Encode the sequence
+        encoded_seq = iupac_encoding(seq)
+        
+        # Pad the encoded sequence
+        if len(encoded_seq) < max_length:
+            pad_length = max_length - len(encoded_seq)
+            padding = np.array([list(padding_value)] * pad_length)
+
+            if pad_position == "pre":
+                encoded_seq = np.vstack((padding, encoded_seq))
+            else:  # "post"
+                encoded_seq = np.vstack((encoded_seq, padding))
+        
+        processed_sequences.append(encoded_seq)
+
+    return processed_sequences
+
+# Build a Bi-LSTM autoencoder
+def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, dropout_rate, activation):
+    """
+    Build a Bi-LSTM autoencoder.
+    """
+
+    lstm_units_2 = lstm_units // 2
+
+    # Encoder
+    inputs = Input(shape=(seq_len, feature_dim))
+    encoded = Bidirectional(LSTM(lstm_units, return_sequences=True, activation=activation))(inputs)
+    encoded = Dropout(dropout_rate)(encoded)
+    encoded = Bidirectional(LSTM(lstm_units_2, return_sequences=False, activation=activation))(encoded)
+    encoded_latent = Dense(embedding_size, activation=activation)(encoded)
+    
+    # Decoder
+    decoded = RepeatVector(seq_len)(encoded_latent) # Convert 2D latent representation to 3D
+    decoded = LSTM(lstm_units_2, return_sequences=True, activation=activation)(decoded)
+    decoded = Dropout(dropout_rate)(decoded)
+    decoded = LSTM(lstm_units, return_sequences=True, activation=activation)(decoded)
+    decoded = TimeDistributed(Dense(feature_dim, activation='softmax'))(decoded)
+    
+    # Autoencoder
+    autoencoder = Model(inputs, decoded)
+    return autoencoder
+
+# Define the objective function for Optuna optimization
+def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
+    # Hyperparameters to be tuned
+
+    # Learning rate
+    lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
+
+    # Batch size
+    #batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
+    batch_size = trial.suggest_categorical("batch_size", [16, 32])
+
+    # Number of units in the LSTM layer
+    #lstm_size = trial.suggest_categorical('units', [256, 512, 1024])
+    lstm_size = trial.suggest_categorical('units', [32, 64, 128])
+
+    # Latent dimension (embedding size)
+    #embedding_size = trial.suggest_categorical("latent_dim", [128, 256, 512])
+    embedding_size = trial.suggest_categorical("latent_dim", [20, 30, 40])
+
+    # Optimizer choice
+    optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
+    if optimizer_name == "adam":
+        optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=lr)
+    elif optimizer_name == "sgd":
+        optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=lr)
+
+    # Dropout rate for regularization
+    dropout_rate = trial.suggest_float("dropout_rate", 0.2, 0.5, step=0.1)
+
+    # Activation function choice
+    activation = trial.suggest_categorical("activation", ["relu", "tanh", "sigmoid"])
+
+    # Build and compile the autoencoder
+    if architecture == 'bilstm':
+        
+        autoencoder = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation)
+        autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
+
+        # Train the model
+        autoencoder.fit(X_train, X_train, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
+
+        # Return validation loss
+        val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+        return val_loss
+
+    elif architecture == 'transformer':
+        print("Transformer model is not implemented yet.")
+        sys.exit(1)
+
+# Aggregate the optuna trials and yeild the best set of hyperparameters
+def aggregate_hyperparameters(best_hyperparameters):
+    """
+    Aggregate hyperparameters across folds using the Voting/Most Frequent strategy
+    for categorical parameters and Averaging for continuous parameters.
+    
+    Args:
+    - best_hyperparameters (list): List of dictionaries. Each dictionary contains 
+      the best hyperparameters for a fold.
+      
+    Returns:
+    - aggregated_params (dict): Dictionary containing the aggregated hyperparameters.
+    """
+    
+    # Initialize aggregated_params dictionary
+    aggregated_params = {}
+    
+    # For each hyperparameter, check if it's categorical or continuous and aggregate accordingly
+    for key in best_hyperparameters[0].keys():
+        if key == "lr":
+            # Average the learning rates
+            aggregated_params[key] = sum([params[key] for params in best_hyperparameters]) / len(best_hyperparameters)
+        else:
+            # Use the Voting/Most Frequent strategy for other hyperparameters
+            most_common = Counter([params[key] for params in best_hyperparameters]).most_common(1)
+            aggregated_params[key] = most_common[0][0]
+    
+    return aggregated_params
 
 
+    """
+    Plot the training and validation metrics from the Keras history object and save the plots.
+    
+    Args:
+    - history (History): Keras History object returned by the .fit() method.
+    - save_dir (str): Directory to save the plots.
+    
+    Returns:
+    - None (Displays and saves the plots).
+    """
+    
+    # Extract loss from the history object
+    loss = history.history['loss']
+    epochs = range(1, len(loss) + 1)
+    
+    # Plot training loss
+    plt.figure(figsize=(12, 6))
+    plt.plot(epochs, loss, 'bo', label='Training loss')
+    
+    # Plot validation loss if available
+    if 'val_loss' in history.history:
+        val_loss = history.history['val_loss']
+        plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.savefig(os.path.join(save_dir, 'training_validation_loss.png'))
+    plt.show()
+    
+    # If there are other metrics in the history object, plot them
+    for metric, values in history.history.items():
+        if metric not in ['loss', 'val_loss']:
+            plt.figure(figsize=(12, 6))
+            plt.plot(epochs, values, 'bo', label=f'Training {metric}')
+            
+            # Plot validation metric if available
+            if f'val_{metric}' in history.history:
+                val_values = history.history[f'val_{metric}']
+                plt.plot(epochs, val_values, 'b', label=f'Validation {metric}')
+            
+            plt.title(f'Training and Validation {metric}')
+            plt.xlabel('Epochs')
+            plt.ylabel(metric.capitalize())
+            plt.legend()
+            plt.savefig(os.path.join(save_dir, f'training_validation_{metric}.png'))
+            plt.show()
+
+# Main function
 def main():
-    parser = argparse.ArgumentParser(
-        description=dedent('''
-        ntEmbd Pipeline
-        -----------------------------------------------------------
-        #Description of the whole ntEmbd pipeline
-        '''),
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description='ntEmbd: Deep learning embedding for nucleotide sequences')
+    subparsers = parser.add_subparsers(dest='mode', required=True, help='Sub-command help')
 
-    parser.add_argument('-v', '--version', action='version', version='ntEmbd ' + VERSION)
-    subparsers = parser.add_subparsers(dest='mode', description=dedent('''
-        You may run ntEmbd in several ways.
-        For detailed usage of each mode:
-            ntEmbd.py mode -h
-        -------------------------------------------------------
-        '''))
-    parser_train = subparsers.add_parser('train', help="Run the ntEmbd on train mode")
-    parser_train.add_argument('-a', '--train', help='Input sequences for training', required=True)
-    parser_train.add_argument('-b', '--test', help='Input sequences for testing', required=True)
-    parser_train.add_argument('-n', '--num_neurons', help='Number of neurons for the learned representation', default=64, type=int)
-    parser_train.add_argument('-l', '--maxlen', help='The maximum length of input sequences', default=1000, type=int)
-    parser_train.add_argument('-e', '--epoch', help='The number of epochs', default=100, type=int)
-    parser_train.add_argument('-p', '--pad', help='Choose between "pre" and "post" padding', default="pre", type=str)
-    parser_train.add_argument('--no_mask_zero', help='Disable masking step for zero padded sequences', action='store_false', default=True)
-    parser_train.add_argument('-o', '--output', help="The output directory/name to save trained model", required=True)
+    # Train subparser
+    train_parser = subparsers.add_parser('train', help='Train a new model.')
 
-    parser_read = subparsers.add_parser('read', help="Run the ntEmbd on the read mode")
-    parser_read.add_argument('-i', '--input', help="Input sequences in FASTA/FASTQ format to parse", required=True)
-    parser_read.add_argument('-y', '--label', help="Label to be used for the input sequences", required=True)
-    parser_read.add_argument('-o', '--output', help="The output directory/name to save parsed input file", required=True)
-    parser_read.add_argument('--no_padding', help="", action='store_false', default=True)
-    parser_read.add_argument('-p', '--padpos', help=' Choose between "pre" and "post" padding', default="pre", type=str)
-    parser_read.add_argument('-l', '--maxlen', help='The maximum length of input sequences', default=1000, type=int)
+    # Required arguments
+    train_parser.add_argument('input_fasta', type=str, nargs='+', help='Path(s) to the input FASTA file(s) for training. You can provide multiple paths separated by spaces.')
+
+    # Optional arguments
+    train_parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training the model.')
+    train_parser.add_argument('--optuna_epoch', type=int, default=5, help='Number of epochs for training the model during hyperparameter optimization.')
+    train_parser.add_argument('--embedding_size', type=int, default=128, help='Size of the latent representation/embedding.')
+    train_parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training.')
+    train_parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer.')
+    train_parser.add_argument('--save_model', type=str, default=None, help='Path to save the trained model.')
+    train_parser.add_argument('--load_model', type=str, default=None, help='Path to a pre-trained model to continue training or for embedding generation.')
+    train_parser.add_argument('--output_embeddings', type=str, default='embeddings.tsv', help='Path to save the generated embeddings.')
+    train_parser.add_argument('--log_dir', type=str, default='./logs', help='Directory to save training logs and TensorBoard data.')
+    train_parser.add_argument('--gpu', action='store_true', help='Use GPU for training if available.')
+    train_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
+    train_parser.add_argument('--padding', type=str, choices=['pre', 'post', 'ignore'], default='post', help='Choose the padding position: "pre" for start and "post" for end.')
+    train_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
+    train_parser.add_argument('--long_seq', type=str, choices=['truncate_start', 'truncate_end', 'ignore'], default='ignore', help='How to handle sequences longer than max_length: "truncate" or "ignore". Default is "truncate".')
+    train_parser.add_argument('--arch', choices=['bilstm', 'transformer'], default='bilstm', help='Model architecture (default: bilstm)')
+    train_parser.add_argument('--loss', choices=['angular_distance', 'mse'], default='angular_distance', help='Loss function (default: angular_distance)')
+    train_parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='adam', help='Optimizer (default: adam)')
+    train_parser.add_argument('--early_stopping', action='store_true', default=False, help='Enable early stopping.')
+    train_parser.add_argument('--hyperparameter_optimization', action='store_true', default=False, help='Enable hyperparameter optimization.')
+    train_parser.add_argument('--optuna_trial', type=int, default=10, help='Number of trials for hyperparameter optimization using Optuna.')
+    train_parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate for regularization.')
+    train_parser.add_argument('--lstm_units', type=int, default=256, help='Number of units in the LSTM layer.')
+    train_parser.add_argument('--activation', choices=['relu', 'tanh', 'sigmoid'], default='relu', help='Activation function (default: relu)')
 
 
+    # Embed subparser
+    embed_parser = subparsers.add_parser('embed', help='Generate embeddings using a pre-trained model.')
+    embed_parser.add_argument('input_fasta', type=str, help='Path to the input FASTA file for generating embeddings.')
+    embed_parser.add_argument('model_path', type=str, help='Path to the pre-trained model.')
+    # ... other embedding related args ...
+
+    # Evaluate subparser
+    eval_parser = subparsers.add_parser('evaluate', help='Evaluate a trained model.')
+    eval_parser.add_argument('input_fasta', type=str, help='Path to the input FASTA file for evaluation.')
+    eval_parser.add_argument('model_path', type=str, help='Path to the trained model.')
+    # ... other evaluation related args ...
+
+    # Fine-tune subparser
+    finetune_parser = subparsers.add_parser('fine-tune', help='Fine-tune a pre-trained model on a new dataset.')
+    finetune_parser.add_argument('input_fasta', type=str, help='Path to the input FASTA file for fine-tuning.')
+    finetune_parser.add_argument('model_path', type=str, help='Path to the pre-trained model to continue training.')
+    # ... other fine-tuning related args ...
+
+    # Visualize subparser
+    visualize_parser = subparsers.add_parser('visualize', help='Visualize the embeddings.')
+    visualize_parser.add_argument('embeddings_path', type=str, help='Path to the embeddings file.')
+    # ... other visualization related args ...
+
+    # Info subparser
+    info_parser = subparsers.add_parser('info', help='Get information about a trained model.')
+    info_parser.add_argument('model_path', type=str, help='Path to the trained model.')
 
     args = parser.parse_args()
 
@@ -106,121 +432,122 @@ def main():
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    if args.mode == "read":
-        input_file = args.input
-        label = args.label
-        output_dir = args.output
-        maxlen = args.maxlen
-        pad = args.no_padding
-        padpos = args.padpos
+    # Depending on the sub-command, call the respective functions
+    if args.mode == 'train':
 
-        print("\nrunning the ntEmbd (read mode) with following parameters\n")
-        print("input file", input_file)
-        print("label", label)
-        print("max sequence length", maxlen)
-        print("Padding", pad)
-        print("Output", output_dir)
-        if not pad:
-            print("Padding position", padpos)
+        reset_seeds(args.seed)
 
-        read_lengths = []
-        read_seqs = []
-        read_labels = []
+        all_sequences = []
+        for fasta_file in args.input_fasta:
+            with open(fasta_file, 'rt') as f:
+                for seqN, seqS, seqQ in readfq(f):
+                    all_sequences.append(seqS)
 
-        with open(input_file, 'rt') as f:
-            for seqN, seqS, seqQ in readfq(f):
-                read_lengths.append(len(seqS))
-                read_seqs.append(seqS.upper())
-                read_labels.append(label)
+        # pre-process sequences for training
+        processed_sequences = process_sequences(all_sequences, args.max_length, args.long_seq, args.padding, padding_value=(-1, -1, -1, -1))
+        processed_sequences_array = np.array(processed_sequences)
 
-        #to be used for visualization and stat reports
-        input_data = pd.DataFrame(
-            {'label': read_labels,
-             'length': read_lengths
-             })
+        #Splitting the data and setting up cross-validation
+        train_val_data, test_data = train_test_split(processed_sequences_array, test_size=0.20, random_state=args.seed)
+        train_data, val_data = train_test_split(train_val_data, test_size=0.25, random_state=args.seed)  # 0.25 x 0.80 = 0.20
 
-        input_data_indices = [i for i in range(len(read_lengths)) if read_lengths[i] <= maxlen]
-        read_labels_processed = np.full((len(input_data_indices), 1), label)
-
-        input_data_processed = []
-        input_data_processed_text = []
-        for i in input_data_indices:
-            current = np.array(list(read_seqs[i])).reshape(-1, 1)
-            current = np.where(current == 'A', 1, current)
-            current = np.where(current == 'T', 2, current)
-            current = np.where(current == 'C', 3, current)
-            current = np.where(current == 'G', 4, current)
-            current = np.where(current == 'N', 5, current)
-            current = np.where(current == 'W', 5, current)
-            current = current.astype('int')
-            input_data_processed.append(current)
-            input_data_processed_text.append(read_seqs[i])
-
-        if not pad:
-            input_data_final = tf.keras.preprocessing.sequence.pad_sequences(input_data_processed, padding=pad, maxlen=maxlen, dtype='int32', value=0.0)
+        # Save the train, validation, and test data. Get directory from args.save_model if provided, otherwise use the path of the FASTA file
+        if args.save_model:
+            save_dir = os.path.dirname(args.save_model)
         else:
-            #here I need to ignore padding and just output the numpy array of each sequence.
-            input_data_final = np.array(input_data_processed)
+            save_dir = os.path.dirname(args.input_fasta[0])
 
-        input_data_final_shuffled = shuffle(input_data_final, random_state=42)
+        np.save(save_dir + "train_data.npy", train_data)
+        np.save(save_dir + "val_data.npy", val_data)
+        np.save(save_dir + "test_data.npy", test_data)
 
-        np.save(output_dir + "_seqs", input_data_final_shuffled)
-        np.save(output_dir + "_labels", read_labels_processed)
+        kf = KFold(n_splits=5, shuffle=True, random_state=args.seed)  # Using 5-fold cross-validation
 
+        # Check if hyperparameter optimization is enabled or not and set the number of trials for Optuna
+        if args.hyperparameter_optimization:
+            # Store validation losses and best hyperparameters
+            validation_losses = []
+            best_hyperparameters = []
+            n_trials = args.optuna_trial
+            for fold_num, (train_index, val_index) in enumerate(kf.split(train_data), start=1):  # Using start=1 to begin counting from 1
+                print(f"Processing Fold {fold_num} ...")
+                # Split data into training and validation sets
+                X_train, X_val = train_data[train_index], train_data[val_index]
 
-    if args.mode == "train":
-        train_numpy = args.train
-        test_numpy = args.test
-        num_nn = args.num_neurons
-        epoch = args.epoch
-        maxlen = args.maxlen
-        mask = args.no_mask_zero
-        pad = args.pad
-        output_dir = args.output
+                # Initialize Optuna study
+                study = optuna.create_study(direction="minimize")
+                study.optimize(lambda trial: optuna_objective(args.max_length, args.arch, args.optuna_epoch, trial, X_train, X_val), n_trials=n_trials)
 
+                # Append best loss and hyperparameters for this fold
+                validation_losses.append(study.best_value)
+                best_hyperparameters.append(study.best_params)
+            
+            # Compute average and standard deviation of validation losses
+            average_loss = np.mean(validation_losses)
+            std_loss = np.std(validation_losses)
+            print(f"Average validation loss: {average_loss:.4f} ± {std_loss:.4f}")
 
-        print("\nrunning the ntEmbd (train mode) with following parameters\n")
-        print("number of neurons", num_nn)
-        print("max sequence length", maxlen)
-        print("epoch", epoch)
-        print("zero masking", mask)
-        print("Padding", pad)
-        print("Output", output_dir)
+            # aggregate the hyperparameters across folds
+            best_hyperparameters = aggregate_hyperparameters(best_hyperparameters)
+            print(f"Best hyperparameters: {best_hyperparameters}")
+            embedding_size = best_hyperparameters["latent_dim"]
+            dropout_rate = best_hyperparameters["dropout_rate"]
+            lstm_units = best_hyperparameters["units"]
+            activation = best_hyperparameters["activation"]
+            optimizer = best_hyperparameters["optimizer"]
+            batch_size = best_hyperparameters["batch_size"]
+            learning_rate = best_hyperparameters["lr"] # Learning rate is optimized within the optimizer. So, we don't need to use it here.
 
+        else:
+            # Instead of Hyperparameter tuning, use the parameters provided (or default values)
+            embedding_size = args.embedding_size
+            dropout_rate = args.dropout_rate
+            lstm_units = args.lstm_units
+            activation = args.activation
+            optimizer_choice = args.optimizer
+            if optimizer_choice == "adam":
+                optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate)
+            elif optimizer_choice == "sgd":
+                optimizer = tf.keras.optimizers.SGD(learning_rate=args.learning_rate)
+            batch_size = args.batch_size
 
-        X_train = np.load(train_numpy)
-        X_test = np.load(test_numpy)
+        log_dir = args.log_dir
+        epoch = args.epochs
+        loss = args.loss
+        if loss == 'angular_distance':
+            loss = angular_distance_tf
+            
+        # Build and compile the model (either with optimized or default hyperparameters)
+        autoencoder = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation)
+        autoencoder.compile(optimizer=optimizer, loss=loss)
+        autoencoder.summary()
 
+        # Write the model summary to a file in the log directory
+        with open(log_dir + "model_summary.txt", "w") as f:
+            autoencoder.summary(print_fn=lambda x: f.write(x + '\n'))
 
-        model = tf.keras.Sequential([
-            tf.keras.layers.Embedding(input_dim=5, output_dim=5, mask_zero=mask),
-            tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(num_nn, return_sequences=False), input_shape=(maxlen, 5)),
-            tf.keras.layers.RepeatVector(maxlen),
-            tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(1, activation='relu')),
-        ])
+        # Introduce early stopping and model checkpoints
+        if args.early_stopping:
+            early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+            model_checkpoint = tf.keras.callbacks.ModelCheckpoint(save_dir + 'best_model.h5', monitor='val_loss', save_best_only=True)
 
-        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=10)
-        mc = ModelCheckpoint(output_dir + "_bestmodelcheckpoint", verbose=1, monitor='val_accuracy', mode='max', save_best_only=True)
-
-        model.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
-
-        history = model.fit(X_train, X_train, validation_split=0.2, epochs=epoch, callbacks=[es, mc])
-        model.summary()
-
-        layer_name = model.layers[1].name
-        intermediate_layer_model = Model(inputs=model.input,
-                                         outputs=model.get_layer(layer_name).output)
-
-        layer_output_train = intermediate_layer_model.predict(X_train)
-        layer_output_test = intermediate_layer_model.predict(X_test)
-
-
-        model.save(output_dir)
-        np.savetxt(output_dir + "_train", layer_output_train)
-        np.savetxt(output_dir + "_test", layer_output_test)
-        sys.stdout.write(strftime("%Y-%m-%d %H:%M:%S") + ": Finished!\n")
-        return
-
+        # Train the model using the whole training set and validate using the separate validation set
+        train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
+        val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
+        history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
+        
+        # Plot the training history and save it to a file in the log directory
+        with open(log_dir + "training_history.txt", "w") as f:
+            f.write(str(history.history))
+        
+        # Compute validation loss and print it
+        val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
+        print(f"Validation loss: {val_loss:.4f}")
+            
+    elif args.mode == 'embed':
+        # call embedding function
+        pass
+    # ... handle other sub-commands ...
 
 
 if __name__ == "__main__":
