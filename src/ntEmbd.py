@@ -515,14 +515,19 @@ def main():
 
         # Check if hyperparameter optimization is enabled or not and set the number of trials for Optuna
         if args.hyperparameter_optimization:
+
+            # Sample 1/10 of the data for hyperparameter tuning
+            sample_indices = np.random.choice(train_data.shape[0], size=int(train_data.shape[0] * 0.1), replace=False)
+            sampled_data = train_data[sample_indices]
+
             # Store validation losses and best hyperparameters
             validation_losses = []
             best_hyperparameters = []
             n_trials = args.optuna_trial
-            for fold_num, (train_index, val_index) in enumerate(kf.split(train_data), start=1):  # Using start=1 to begin counting from 1
+            for fold_num, (train_index, val_index) in enumerate(kf.split(sampled_data), start=1):  # Using start=1 to begin counting from 1
                 print(f"Processing Fold {fold_num} ...")
                 # Split data into training and validation sets
-                X_train, X_val = train_data[train_index], train_data[val_index]
+                X_train, X_val = sampled_data[train_index], sampled_data[val_index]
 
                 # Initialize Optuna study
                 study = optuna.create_study(direction="minimize")
