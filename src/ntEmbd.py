@@ -231,7 +231,11 @@ def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, d
     
     # Autoencoder
     autoencoder = Model(inputs, decoded)
-    return autoencoder
+
+    # Embedding model
+    embedding_model = Model(inputs, encoded_latent)
+
+    return autoencoder, embedding_model
 
 # Define the objective function for Optuna optimization
 def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
@@ -268,10 +272,10 @@ def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
     # Build and compile the autoencoder
     if architecture == 'bilstm':
         
-        autoencoder = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation)
-        autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
-
+        autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation)
+        
         # Train the model
+        autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
         autoencoder.fit(X_train, X_train, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
 
         # Return validation loss
@@ -431,7 +435,7 @@ def main():
     train_parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer.')
     train_parser.add_argument('--save_model', type=str, default=None, help='Path to save the trained model.')
     train_parser.add_argument('--load_model', type=str, default=None, help='Path to a pre-trained model to continue training or for embedding generation.')
-    train_parser.add_argument('--output_embeddings', type=str, default='embeddings.tsv', help='Path to save the generated embeddings.')
+    train_parser.add_argument('--save_embeddings', action='store_true', help='Generate embeddings for the training data and save them.')
     train_parser.add_argument('--log_dir', type=str, default='./logs', help='Directory to save training logs and TensorBoard data.')
     train_parser.add_argument('--gpu', action='store_true', help='Use GPU for training if available.')
     train_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
@@ -447,7 +451,6 @@ def main():
     train_parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate for regularization.')
     train_parser.add_argument('--lstm_units', type=int, default=256, help='Number of units in the LSTM layer.')
     train_parser.add_argument('--activation', choices=['relu', 'tanh', 'sigmoid'], default='relu', help='Activation function (default: relu)')
-
 
     # Embed subparser
     embed_parser = subparsers.add_parser('embed', help='Generate embeddings using a pre-trained model.')
@@ -573,7 +576,7 @@ def main():
             loss = angular_distance_tf
             
         # Build and compile the model (either with optimized or default hyperparameters)
-        autoencoder = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation)
+        autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation)
         autoencoder.compile(optimizer=optimizer, loss=loss)
         autoencoder.summary()
 
@@ -602,6 +605,12 @@ def main():
         # Compute validation loss and print it
         val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
         print(f"Validation loss: {val_loss:.4f}")
+
+        # Save the embeddings if --save_embeddings is enabled
+        if args.save_embeddings:
+            # Generate embeddings for the training data
+            train_embeddings = embedding_model.predict(train_data)
+            np.savetxt(save_dir + "train_embeddings.tsv", train_embeddings, delimiter='\t')
             
     elif args.mode == 'embed':
         # call embedding function
