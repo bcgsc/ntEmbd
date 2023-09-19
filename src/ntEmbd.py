@@ -416,6 +416,55 @@ def plot_and_save_training_history(history, save_dir):
             plt.savefig(os.path.join(save_dir, f'training_validation_{metric}.png'))
             plt.show()
 
+# Analyze RNA sequences and plot their length distribution
+def analyze_sequences(sequences, max_length):
+    """
+    Perform statistical analysis on RNA sequences and plot their length distribution.
+    
+    Args:
+    - sequences (list): List of RNA sequences.
+    - max_length (int): The maximum sequence length to be used for the vertical line.
+    
+    Returns:
+    - None (Displays the statistics and plots).
+    """
+    
+    # Calculate sequence lengths
+    sequence_lengths = [len(seq) for seq in sequences]
+    
+    # Basic statistics
+    total_sequences = len(sequences)
+    min_seq_length = min(sequence_lengths)
+    max_seq_length = max(sequence_lengths)
+    mean_seq_length = np.mean(sequence_lengths)
+    median_seq_length = np.median(sequence_lengths)
+    
+    # Display statistics
+    print(f"Total RNA sequences: {total_sequences}")
+    print(f"Shortest sequence length: {min_seq_length}")
+    print(f"Longest sequence length: {max_seq_length}")
+    print(f"Mean sequence length: {mean_seq_length:.2f}")
+    print(f"Median sequence length: {median_seq_length}")
+    print(f"Percentage of sequences longer than {max_length}: {sum(1 for x in sequence_lengths if x > max_length) / total_sequences * 100:.2f}%")
+    
+    # Plotting the length distribution
+    plt.figure(figsize=(10, 6))
+    plt.hist(sequence_lengths, bins=np.logspace(np.log10(min_seq_length), np.log10(max_seq_length), 50), weights=np.ones(total_sequences) / total_sequences)
+    plt.gca().set_xscale("log")
+    plt.gca().set_ylim(0, 1)
+    plt.axvline(x=max_length, color='red', linestyle='--', label=f"Max length: {max_length}")
+    plt.title("RNA Sequence Length Distribution")
+    plt.xlabel("Sequence Length (Log Scale)")
+    plt.ylabel("Percentage of Sequences")
+    
+    # Set x-axis ticks to be 10 to the power of 1, 2, 3, etc.
+    max_power = int(np.ceil(np.log10(max_seq_length)))
+    plt.xticks([10**i for i in range(1, max_power+1)], [f"$10^{i}$" for i in range(1, max_power+1)])
+    
+    plt.legend()
+    plt.grid(True, which="both", ls="--", c='0.65')
+    plt.show()
+
 # Main function
 def main():
     parser = argparse.ArgumentParser(description='ntEmbd: Deep learning embedding for nucleotide sequences')
@@ -495,6 +544,9 @@ def main():
             with open(fasta_file, 'rt') as f:
                 for seqN, seqS, seqQ in readfq(f):
                     all_sequences.append(seqS)
+
+        # Analyze the sequences and plot their length distribution
+        analyze_sequences(all_sequences, args.max_length)
 
         # pre-process sequences for training
         processed_sequences = process_sequences(all_sequences, args.max_length, args.long_seq, args.padding, padding_value=(-1, -1, -1, -1))
