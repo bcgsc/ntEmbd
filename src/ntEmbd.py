@@ -485,7 +485,6 @@ def main():
     train_parser.add_argument('--save_model', type=str, default=None, help='Path to save the trained model.')
     train_parser.add_argument('--load_model', type=str, default=None, help='Path to a pre-trained model to continue training or for embedding generation.')
     train_parser.add_argument('--save_embeddings', action='store_true', help='Generate embeddings for the training data and save them.')
-    train_parser.add_argument('--log_dir', type=str, default='./logs', help='Directory to save training logs and TensorBoard data.')
     train_parser.add_argument('--gpu', action='store_true', help='Use GPU for training if available.')
     train_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
     train_parser.add_argument('--padding', type=str, choices=['pre', 'post', 'ignore'], default='post', help='Choose the padding position: "pre" for start and "post" for end.')
@@ -621,7 +620,6 @@ def main():
                 optimizer = tf.keras.optimizers.SGD(learning_rate=args.learning_rate)
             batch_size = args.batch_size
 
-        log_dir = args.log_dir
         epoch = args.epochs
         loss = args.loss
         if loss == 'angular_distance':
@@ -632,8 +630,8 @@ def main():
         autoencoder.compile(optimizer=optimizer, loss=loss)
         autoencoder.summary()
 
-        # Write the model summary to a file in the log directory
-        with open(log_dir + "model_summary.txt", "w") as f:
+        # Save the model summary to a file
+        with open(save_dir + "model_summary.txt", "w") as f:
             autoencoder.summary(print_fn=lambda x: f.write(x + '\n'))
         
         # Train the model using the whole training set and validate using the separate validation set
@@ -649,7 +647,7 @@ def main():
             history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
         
         # Plot the training history and save it to a file in the log directory
-        with open(log_dir + "training_history.txt", "w") as f:
+        with open(save_dir + "training_history.txt", "w") as f:
             f.write(str(history.history))
 
         plot_and_save_training_history(history, save_dir)
