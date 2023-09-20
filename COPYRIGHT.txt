@@ -19,8 +19,7 @@ License: GPL-3
  For commercial licensing options, please contact
  Patrick Rebstein <prebstein@bccancer.bc.ca>
 
-Files: besthit_to_histogram.py get_besthit.py head_align_tail_dict.py 
-       mixed_models.py read_analysis.py simulator.py model_fitting.R 
-Copyright: Copyright 2016 Chen yang
+Files: ntEmbd.py get_metrics.py classification.py  
+Copyright: Copyright 2023 Saber Hafezqorani
 License: GPL-3
 
