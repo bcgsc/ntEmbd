@@ -249,19 +249,19 @@ def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
     batch_size = trial.suggest_categorical("batch_size", [16, 32])
 
     # Number of units in the LSTM layer
-    #lstm_size = trial.suggest_categorical('units', [256, 512, 1024])
-    lstm_size = trial.suggest_categorical('units', [32, 64, 128])
+    lstm_size = trial.suggest_categorical('units', [256, 512])
+    #lstm_size = trial.suggest_categorical('units', [32, 64, 128])
 
     # Latent dimension (embedding size)
-    #embedding_size = trial.suggest_categorical("latent_dim", [128, 256, 512])
-    embedding_size = trial.suggest_categorical("latent_dim", [20, 30, 40])
+    embedding_size = trial.suggest_categorical("latent_dim", [128, 256])
+    #embedding_size = trial.suggest_categorical("latent_dim", [20, 30, 40])
 
     # Optimizer choice
     optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
     if optimizer_name == "adam":
-        optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=lr)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     elif optimizer_name == "sgd":
-        optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=lr)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
 
     # Dropout rate for regularization
     dropout_rate = trial.suggest_float("dropout_rate", 0.2, 0.5, step=0.1)
@@ -557,9 +557,9 @@ def main():
 
         # Save the train, validation, and test data. Get directory from args.save_model if provided, otherwise use the path of the FASTA file
         if args.save_model:
-            save_dir = os.path.dirname(args.save_model)
+            save_dir = os.path.abspath(args.save_model)
         else:
-            save_dir = os.path.dirname(args.input_fasta[0])
+            save_dir = os.path.abspath(args.input_fasta[0])
 
         np.save(save_dir + "train_data.npy", train_data)
         np.save(save_dir + "val_data.npy", val_data)
