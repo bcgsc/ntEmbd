@@ -11,6 +11,7 @@ import tensorflow as tf
 import optuna
 from collections import Counter
 import matplotlib.pyplot as plt
+import platform
 
 
 PYTHON_VERSION = sys.version_info
@@ -259,9 +260,15 @@ def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
     # Optimizer choice
     optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
     if optimizer_name == "adam":
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        if is_mac_arm64():
+            optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=lr)
+        else:
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     elif optimizer_name == "sgd":
-        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+        if is_mac_arm64():
+            optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=lr)
+        else:
+            optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
 
     # Dropout rate for regularization
     dropout_rate = trial.suggest_float("dropout_rate", 0.2, 0.5, step=0.1)
@@ -424,6 +431,15 @@ def analyze_sequences(sequences, max_length):
     plt.tight_layout()
     plt.show()
 
+# check whether platform is macOS with M1/M2 chip
+def is_mac_arm64():
+    if platform.system() == 'Darwin':  # Darwin indicates macOS
+        if platform.machine() == 'arm64':
+            return True
+        else:
+            return False
+    return False
+
 # Main function
 def main():
     parser = argparse.ArgumentParser(description='ntEmbd: Deep learning embedding for nucleotide sequences')
@@ -462,7 +478,7 @@ def main():
     # Analyze input sequences subparser
     analyze_parser = subparsers.add_parser('analyze', help='Analyze the input sequences.')
     analyze_parser.add_argument('input_fasta', type=str, nargs='+', help='Path(s) to the input FASTA file(s) for analysis. You can provide multiple paths separated by spaces.')
-    analyze_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
+    analyze_parser.add_argument('max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
     
     # Embed subparser
     embed_parser = subparsers.add_parser('embed', help='Generate embeddings using a pre-trained model.')
@@ -531,7 +547,7 @@ def main():
         # Check if hyperparameter optimization is enabled or not and set the number of trials for Optuna
         if args.hyperparameter_optimization:
 
-            # Sample 1/10 of the data for hyperparameter tuning
+            # Sample data for hyperparameter optimization
             sample_indices = np.random.choice(train_data.shape[0], size=int(train_data.shape[0] * 0.1), replace=False)
             sampled_data = train_data[sample_indices]
 
@@ -576,9 +592,15 @@ def main():
             activation = args.activation
             optimizer_choice = args.optimizer
             if optimizer_choice == "adam":
-                optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate)
+                if is_mac_arm64:
+                    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=args.learning_rate)
+                else:
+                    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate)
             elif optimizer_choice == "sgd":
-                optimizer = tf.keras.optimizers.SGD(learning_rate=args.learning_rate)
+                if is_mac_arm64:
+                    optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=args.learning_rate)
+                else:
+                    optimizer = tf.keras.optimizers.SGD(learning_rate=args.learning_rate)
             batch_size = args.batch_size
 
         epoch = args.epochs
