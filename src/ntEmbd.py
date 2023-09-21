@@ -450,6 +450,11 @@ def main():
     train_parser.add_argument('--lstm_units', type=int, default=256, help='Number of units in the LSTM layer.')
     train_parser.add_argument('--activation', choices=['relu', 'tanh', 'sigmoid'], default='relu', help='Activation function (default: relu)')
 
+    # Analyze input sequences subparser
+    analyze_parser = subparsers.add_parser('analyze', help='Analyze the input sequences.')
+    analyze_parser.add_argument('input_fasta', type=str, nargs='+', help='Path(s) to the input FASTA file(s) for analysis. You can provide multiple paths separated by spaces.')
+    analyze_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
+    
     # Embed subparser
     embed_parser = subparsers.add_parser('embed', help='Generate embeddings using a pre-trained model.')
     embed_parser.add_argument('input_fasta', type=str, help='Path to the input FASTA file for generating embeddings.')
@@ -493,9 +498,6 @@ def main():
             with open(fasta_file, 'rt') as f:
                 for seqN, seqS, seqQ in readfq(f):
                     all_sequences.append(seqS)
-
-        # Analyze the sequences and plot their length distribution
-        analyze_sequences(all_sequences, args.max_length)
 
         # pre-process sequences for training
         processed_sequences = process_sequences(all_sequences, args.max_length, args.long_seq, args.padding, padding_value=(-1, -1, -1, -1))
@@ -611,7 +613,16 @@ def main():
             # Generate embeddings for the training data
             train_embeddings = embedding_model.predict(train_data)
             np.savetxt(save_dir + "train_embeddings.tsv", train_embeddings, delimiter='\t')
-            
+
+    elif args.mode == 'analyze':
+        # Analyze the input sequences
+        all_sequences = []
+        for fasta_file in args.input_fasta:
+            with open(fasta_file, 'rt') as f:
+                for seqN, seqS, seqQ in readfq(f):
+                    all_sequences.append(seqS)
+        analyze_sequences(all_sequences, args.max_length)    
+
     elif args.mode == 'embed':
         # call embedding function
         pass
