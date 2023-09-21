@@ -315,56 +315,6 @@ def aggregate_hyperparameters(best_hyperparameters):
     
     return aggregated_params
 
-
-    """
-    Plot the training and validation metrics from the Keras history object and save the plots.
-    
-    Args:
-    - history (History): Keras History object returned by the .fit() method.
-    - save_dir (str): Directory to save the plots.
-    
-    Returns:
-    - None (Displays and saves the plots).
-    """
-    
-    # Extract loss from the history object
-    loss = history.history['loss']
-    epochs = range(1, len(loss) + 1)
-    
-    # Plot training loss
-    plt.figure(figsize=(12, 6))
-    plt.plot(epochs, loss, 'bo', label='Training loss')
-    
-    # Plot validation loss if available
-    if 'val_loss' in history.history:
-        val_loss = history.history['val_loss']
-        plt.plot(epochs, val_loss, 'b', label='Validation loss')
-    
-    plt.title('Training and Validation Loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.savefig(os.path.join(save_dir, 'training_validation_loss.png'))
-    plt.show()
-    
-    # If there are other metrics in the history object, plot them
-    for metric, values in history.history.items():
-        if metric not in ['loss', 'val_loss']:
-            plt.figure(figsize=(12, 6))
-            plt.plot(epochs, values, 'bo', label=f'Training {metric}')
-            
-            # Plot validation metric if available
-            if f'val_{metric}' in history.history:
-                val_values = history.history[f'val_{metric}']
-                plt.plot(epochs, val_values, 'b', label=f'Validation {metric}')
-            
-            plt.title(f'Training and Validation {metric}')
-            plt.xlabel('Epochs')
-            plt.ylabel(metric.capitalize())
-            plt.legend()
-            plt.savefig(os.path.join(save_dir, f'training_validation_{metric}.png'))
-            plt.show()
-
 # Plot the training history and save the plots
 def plot_and_save_training_history(history, save_dir):
     """
@@ -395,7 +345,7 @@ def plot_and_save_training_history(history, save_dir):
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    plt.savefig(os.path.join(save_dir, 'training_validation_loss.png'))
+    plt.savefig(save_dir + 'training_validation_loss.png')
     plt.show()
     
     # If there are other metrics in the history object, plot them
@@ -413,7 +363,7 @@ def plot_and_save_training_history(history, save_dir):
             plt.xlabel('Epochs')
             plt.ylabel(metric.capitalize())
             plt.legend()
-            plt.savefig(os.path.join(save_dir, f'training_validation_{metric}.png'))
+            plt.savefig(save_dir + f'training_validation_{metric}.png')
             plt.show()
 
 # Analyze RNA sequences and plot their length distribution
