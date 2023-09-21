@@ -399,9 +399,12 @@ def analyze_sequences(sequences, max_length):
     
     # Plotting the length distribution
     plt.figure(figsize=(10, 6))
-    plt.hist(sequence_lengths, bins=np.logspace(np.log10(min_seq_length), np.log10(max_seq_length), 50), weights=np.ones(total_sequences) / total_sequences)
+    counts, bin_edges, _ = plt.hist(sequence_lengths, bins=np.logspace(np.log10(min_seq_length), np.log10(max_seq_length), 50), weights=np.ones(total_sequences) / total_sequences, alpha=0.7)
+    
+    # Adjust y-axis limits
+    plt.gca().set_ylim(0, max(counts)*1.1)  # 1.1 for some padding
+    
     plt.gca().set_xscale("log")
-    plt.gca().set_ylim(0, 1)
     plt.axvline(x=max_length, color='red', linestyle='--', label=f"Max length: {max_length}")
     plt.title("RNA Sequence Length Distribution")
     plt.xlabel("Sequence Length (Log Scale)")
@@ -409,10 +412,16 @@ def analyze_sequences(sequences, max_length):
     
     # Set x-axis ticks to be 10 to the power of 1, 2, 3, etc.
     max_power = int(np.ceil(np.log10(max_seq_length)))
-    plt.xticks([10**i for i in range(1, max_power+1)], [f"$10^{i}$" for i in range(1, max_power+1)])
+    x_ticks = [10**i for i in range(1, max_power+1)]
+    plt.xticks(x_ticks, [f"$10^{i}$" for i in range(1, max_power+1)])
+    
+    # Adjust the grid to only show at the x-axis tick positions
+    plt.gca().set_xticks(x_ticks, minor=False)
+    plt.grid(True, which="both", ls="--", c='0.65')
+    plt.gca().xaxis.grid(True, which='minor', linestyle='--', linewidth=0.5)
     
     plt.legend()
-    plt.grid(True, which="both", ls="--", c='0.65')
+    plt.tight_layout()
     plt.show()
 
 # Main function
