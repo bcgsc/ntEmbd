@@ -13,6 +13,7 @@ from collections import Counter
 import matplotlib.pyplot as plt
 import platform
 import logging
+from optuna.visualization import plot_optimization_history, plot_param_importances
 
 
 PYTHON_VERSION = sys.version_info
@@ -579,7 +580,7 @@ def main():
     hyperopt_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
     hyperopt_parser.add_argument('--arch', choices=['bilstm', 'transformer'], default='bilstm', help='Model architecture (default: bilstm)')
     hyperopt_parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training the model within the Optuna objective function.')
-    hyperopt_parser.add_argument('--storage', type=str, default='sqlite:///optuna.db', help='Database URL for Optuna.')
+    hyperopt_parser.add_argument('--storage', type=str, default='sqlite:///ntEmbd_optuna.db', help="Database URL for Optuna. (default='sqlite:///ntEmbd_optuna.db'). If you're running experiments that you don't wish to persist, consider using Optuna's in-memory storage: 'sqlite:///:memory:'")
     hyperopt_parser.add_argument('--save_dir', type=str, default='optuna', help='Directory to save the Optuna study object.')
     hyperopt_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
 
@@ -664,7 +665,7 @@ def main():
                 X_train, X_val = sampled_data[train_index], sampled_data[val_index]
 
                 # Initialize Optuna study
-                study = optuna.create_study(direction="minimize")
+                study = optuna.create_study(direction="minimize", study_name=f"fold_{fold_num}")
                 study.optimize(lambda trial: optuna_objective(args.max_length, args.arch, args.optuna_epoch, trial, X_train, X_val), n_trials=n_trials)
 
                 # Append best loss and hyperparameters for this fold
@@ -789,20 +790,30 @@ def main():
             # Append best loss and hyperparameters for this fold
             validation_losses.append(study.best_value)
             best_hyperparameters.append(study.best_params)
+
+            #plot_optimization_history(study).show()
+            plot_param_importances(study).show()
+            plot_param_importances(study, target=lambda t: t.duration.total_seconds(), target_name="duration")
         
         # Compute average and standard deviation of validation losses
         average_loss = np.mean(validation_losses)
         std_loss = np.std(validation_losses)
         print(f"Average validation loss: {average_loss:.4f} ± {std_loss:.4f}")
 
-        # aggregate the hyperparameters across folds
-        best_hyperparameters = aggregate_hyperparameters(best_hyperparameters)
-        print(f"Best hyperparameters: {best_hyperparameters}")
+        # Save the best hyperparameters of each fold
+        with open(args.save_dir + f"best_hyperparameters.txt", "w") as f:
+            for fold_num, params in enumerate(best_hyperparameters):
+                f.write(f"Fold {fold_num+1}\n")
+                for key, value in params.items():
+                    f.write(str(key) + ': ' + str(value) + '\n')
+                f.write('---- \n')
 
-        # save the best hyperparameters to a file with different names for each fold
-        for fold_num, params in enumerate(best_hyperparameters):
-            with open(args.save_dir + f"best_hyperparameters_fold_{fold_num}.txt", "w") as f:
-                f.write(str(params))
+            # aggregate the hyperparameters across folds
+            best_hyperparameters_total = aggregate_hyperparameters(best_hyperparameters)
+            print(f"Best hyperparameters across folds: {best_hyperparameters_total}")
+            f.write("Best hyperparameters across folds:\n")
+            for key, value in best_hyperparameters_total.items():
+                f.write(str(key) + ': ' + str(value) + '\n')
 
     elif args.mode == 'embed':
         # call embedding function
