@@ -12,6 +12,7 @@ import optuna
 from collections import Counter
 import matplotlib.pyplot as plt
 import platform
+import logging
 
 
 PYTHON_VERSION = sys.version_info
@@ -293,6 +294,70 @@ def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
         print("Transformer model is not implemented yet.")
         sys.exit(1)
 
+# Define the objective function for Optuna optimization - with pruning
+def optuna_objective_pruning_parallel(max_length, architecture, epoch, trial, X_train, X_val):
+    # Hyperparameters to be tuned
+
+    # Learning rate
+    lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
+
+    # Batch size
+    #batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
+    batch_size = trial.suggest_categorical("batch_size", [16, 32])
+
+    # Number of units in the LSTM layer
+    lstm_size = trial.suggest_categorical('units', [256, 512])
+    #lstm_size = trial.suggest_categorical('units', [32, 64, 128])
+
+    # Latent dimension (embedding size)
+    embedding_size = trial.suggest_categorical("latent_dim", [128, 256])
+    #embedding_size = trial.suggest_categorical("latent_dim", [20, 30, 40])
+
+    # Optimizer choice
+    optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
+    if optimizer_name == "adam":
+        if is_mac_arm64():
+            optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=lr)
+        else:
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+    elif optimizer_name == "sgd":
+        if is_mac_arm64():
+            optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=lr)
+        else:
+            optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+
+    # Dropout rate for regularization
+    dropout_rate = trial.suggest_float("dropout_rate", 0.2, 0.5, step=0.1)
+
+    # Activation function choice
+    activation = trial.suggest_categorical("activation", ["relu", "tanh", "sigmoid"])
+
+    # Build and compile the autoencoder
+    if architecture == 'bilstm':
+        
+        autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation)
+        autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
+
+        # Train the model
+        for step in range(epoch):
+            autoencoder.fit(X_train, X_train, epochs=1, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
+
+            # Return validation loss
+            val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+
+            # Report intermediate value for this epoch
+            trial.report(val_loss, step)
+
+            # Check if this trial should be pruned
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+            
+        return val_loss
+
+    elif architecture == 'transformer':
+        print("Transformer model is not implemented yet.")
+        sys.exit(1)
+
 # Aggregate the optuna trials and yeild the best set of hyperparameters
 def aggregate_hyperparameters(best_hyperparameters):
     """
@@ -440,6 +505,31 @@ def is_mac_arm64():
             return False
     return False
 
+# Function to get the Optuna sampler based on user input
+def optuna_get_sampler(sampler_name):
+    if sampler_name == "random":
+        return optuna.samplers.RandomSampler()
+    elif sampler_name == "tpe":
+        return optuna.samplers.TPESampler()
+    elif sampler_name == "cmaes":
+        return optuna.samplers.CmaEsSampler()
+    else:
+        raise ValueError(f"Unknown sampler: {sampler_name}")
+
+# Function to get the Optuna pruner based on user input
+def optuna_get_pruner(pruner_name):
+    if pruner_name == "median":
+        return optuna.pruners.MedianPruner()
+    elif pruner_name == "nop":
+        return optuna.pruners.NopPruner()
+    elif pruner_name == "successive":
+        return optuna.pruners.SuccessiveHalvingPruner()
+    elif pruner_name == "hyperband":
+        return optuna.pruners.HyperbandPruner()
+    else:
+        raise ValueError(f"Unknown pruner: {pruner_name}")
+
+
 # Main function
 def main():
     parser = argparse.ArgumentParser(description='ntEmbd: Deep learning embedding for nucleotide sequences')
@@ -480,6 +570,19 @@ def main():
     analyze_parser.add_argument('input_fasta', type=str, nargs='+', help='Path(s) to the input FASTA file(s) for analysis. You can provide multiple paths separated by spaces.')
     analyze_parser.add_argument('max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
     
+    # Hyperparameter optimization subparser
+    hyperopt_parser = subparsers.add_parser('hyperopt', help='Hyperparameter optimization. This is a standalone mode and does not train a model. It allows Parallelization (needs MySQL db) and allows Sampler selection and Pruning.')
+    hyperopt_parser.add_argument('--data', type=str, help='Path to the training data in numpy format.')
+    hyperopt_parser.add_argument('--sampler', type=str, choices=['random', 'tpe', 'cmaes'], default='tpe', help='Sampler to be used for hyperparameter optimization.')
+    hyperopt_parser.add_argument('--pruner', type=str, choices=['none', 'median', 'halving', 'successive', 'hyperband'], default='hyperband', help='Pruner to be used for hyperparameter optimization.')
+    hyperopt_parser.add_argument('--n_trials', type=int, help='Number of trials for hyperparameter optimization.')
+    hyperopt_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
+    hyperopt_parser.add_argument('--arch', choices=['bilstm', 'transformer'], default='bilstm', help='Model architecture (default: bilstm)')
+    hyperopt_parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training the model within the Optuna objective function.')
+    hyperopt_parser.add_argument('--storage', type=str, default='sqlite:///optuna.db', help='Database URL for Optuna.')
+    hyperopt_parser.add_argument('--save_dir', type=str, default='optuna', help='Directory to save the Optuna study object.')
+    hyperopt_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
+
     # Embed subparser
     embed_parser = subparsers.add_parser('embed', help='Generate embeddings using a pre-trained model.')
     embed_parser.add_argument('input_fasta', type=str, help='Path to the input FASTA file for generating embeddings.')
@@ -542,10 +645,10 @@ def main():
         np.save(save_dir + "val_data.npy", val_data)
         np.save(save_dir + "test_data.npy", test_data)
 
-        kf = KFold(n_splits=5, shuffle=True, random_state=args.seed)  # Using 5-fold cross-validation
-
         # Check if hyperparameter optimization is enabled or not and set the number of trials for Optuna
         if args.hyperparameter_optimization:
+
+            kf = KFold(n_splits=5, shuffle=True, random_state=args.seed)  # Using 5-fold cross-validation
 
             # Sample data for hyperparameter optimization
             sample_indices = np.random.choice(train_data.shape[0], size=int(train_data.shape[0] * 0.1), replace=False)
@@ -652,7 +755,54 @@ def main():
             with open(fasta_file, 'rt') as f:
                 for seqN, seqS, seqQ in readfq(f):
                     all_sequences.append(seqS)
-        analyze_sequences(all_sequences, args.max_length)    
+        analyze_sequences(all_sequences, args.max_length)
+    
+    elif args.mode == 'hyperopt':
+
+        kf = KFold(n_splits=5, shuffle=True, random_state=args.seed)  # Using 5-fold cross-validation
+
+        sampler = optuna_get_sampler(args.sampler)
+        pruner = optuna_get_pruner(args.pruner)
+        storage_name = args.storage
+
+        # Load the training data
+        train_data = np.load(args.data)
+
+        # Sample data for hyperparameter optimization
+        sample_indices = np.random.choice(train_data.shape[0], size=int(train_data.shape[0] * 0.1), replace=False)
+        sampled_data = train_data[sample_indices]
+
+        # Store validation losses and best hyperparameters
+        validation_losses = []
+        best_hyperparameters = []
+        n_trials = args.n_trials
+        for fold_num, (train_index, val_index) in enumerate(kf.split(sampled_data), start=1):  # Using start=1 to begin counting from 1
+            print(f"Processing Fold {fold_num} ...")
+            # Split data into training and validation sets
+            X_train, X_val = sampled_data[train_index], sampled_data[val_index]
+
+            # Initialize Optuna study
+            #optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
+            study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, storage=storage_name, study_name=f"fold_{fold_num}", load_if_exists=True)
+            study.optimize(lambda trial: optuna_objective_pruning_parallel(args.max_length, args.arch, args.epochs, trial, X_train, X_val), n_trials=n_trials)
+
+            # Append best loss and hyperparameters for this fold
+            validation_losses.append(study.best_value)
+            best_hyperparameters.append(study.best_params)
+        
+        # Compute average and standard deviation of validation losses
+        average_loss = np.mean(validation_losses)
+        std_loss = np.std(validation_losses)
+        print(f"Average validation loss: {average_loss:.4f} ± {std_loss:.4f}")
+
+        # aggregate the hyperparameters across folds
+        best_hyperparameters = aggregate_hyperparameters(best_hyperparameters)
+        print(f"Best hyperparameters: {best_hyperparameters}")
+
+        # save the best hyperparameters to a file with different names for each fold
+        for fold_num, params in enumerate(best_hyperparameters):
+            with open(args.save_dir + f"best_hyperparameters_fold_{fold_num}.txt", "w") as f:
+                f.write(str(params))
 
     elif args.mode == 'embed':
         # call embedding function
