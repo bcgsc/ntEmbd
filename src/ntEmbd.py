@@ -12,7 +12,6 @@ import optuna
 from collections import Counter
 import matplotlib.pyplot as plt
 import platform
-import logging
 from optuna.visualization import plot_optimization_history, plot_param_importances
 
 
@@ -580,7 +579,7 @@ def main():
     hyperopt_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
     hyperopt_parser.add_argument('--arch', choices=['bilstm', 'transformer'], default='bilstm', help='Model architecture (default: bilstm)')
     hyperopt_parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training the model within the Optuna objective function.')
-    hyperopt_parser.add_argument('--storage', type=str, default='sqlite:///ntEmbd_optuna.db', help="Database URL for Optuna. (default='sqlite:///ntEmbd_optuna.db'). If you're running experiments that you don't wish to persist, consider using Optuna's in-memory storage: 'sqlite:///:memory:'")
+    hyperopt_parser.add_argument('--storage', type=str, default=None, help="Database URL for Optuna. (default='None'). If you're running experiments that you don't wish to persist, consider using Optuna's in-memory storage: 'sqlite:///:memory:', otherwise select a db name: 'sqlite:///ntEmbd_optuna.db' for exsample.")
     hyperopt_parser.add_argument('--save_dir', type=str, default='optuna', help='Directory to save the Optuna study object.')
     hyperopt_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
 
@@ -617,6 +616,11 @@ def main():
         parser.print_help(sys.stderr)
         sys.exit(1)
 
+    # Prinout the mode, arguments and their values
+    print(f"Running the ntEmbd in {args.mode} mode with the following arguments:")
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+        
     # Depending on the sub-command, call the respective functions
     if args.mode == 'train':
 
@@ -783,8 +787,10 @@ def main():
             X_train, X_val = sampled_data[train_index], sampled_data[val_index]
 
             # Initialize Optuna study
-            #optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
-            study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, storage=storage_name, study_name=f"fold_{fold_num}", load_if_exists=True)
+            if storage_name is None:
+                study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, study_name=f"fold_{fold_num}")
+            else:
+                study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, storage=storage_name, study_name=f"fold_{fold_num}", load_if_exists=True)
             study.optimize(lambda trial: optuna_objective_pruning_parallel(args.max_length, args.arch, args.epochs, trial, X_train, X_val), n_trials=n_trials)
 
             # Append best loss and hyperparameters for this fold
@@ -819,6 +825,10 @@ def main():
         # call embedding function
         pass
     # ... handle other sub-commands ...
+
+    else:
+        print("Unknown mode.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
