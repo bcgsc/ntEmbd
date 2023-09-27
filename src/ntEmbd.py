@@ -2,18 +2,20 @@ import argparse
 import os
 import sys
 import random
-from sklearn.model_selection import train_test_split, KFold
 import numpy as np
+import time
+from sklearn.model_selection import train_test_split, KFold
+#os.environ['TF_METAL_DEVICE_ONLY'] = '1'
+import tensorflow as tf
+tf.get_logger().setLevel('ERROR')
 import tensorflow.keras.backend as K
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, LSTM, Bidirectional, RepeatVector, TimeDistributed, Dropout
-import tensorflow as tf
-import optuna
+from tensorflow.keras.layers import Input, Dense, LSTM, Bidirectional, RepeatVector, TimeDistributed, Dropout, Masking
 from collections import Counter
-import matplotlib.pyplot as plt
 import platform
+import optuna
 from optuna.visualization import plot_optimization_history, plot_param_importances
-
+import matplotlib.pyplot as plt
 
 PYTHON_VERSION = sys.version_info
 VERSION = "0.9"
@@ -210,7 +212,7 @@ def process_sequences(sequences, max_length, truncate_long_sequences, pad_positi
     return processed_sequences
 
 # Build a Bi-LSTM autoencoder
-def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, dropout_rate, activation):
+def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, dropout_rate, activation, nomasking):
     """
     Build a Bi-LSTM autoencoder.
     """
@@ -219,7 +221,11 @@ def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, d
 
     # Encoder
     inputs = Input(shape=(seq_len, feature_dim))
-    encoded = Bidirectional(LSTM(lstm_units, return_sequences=True, activation=activation))(inputs)
+    if nomasking:
+        encoded = Bidirectional(LSTM(lstm_units, return_sequences=True, activation=activation))(inputs)
+    else:
+        masked = Masking(mask_value=(-1, -1, -1, -1))(inputs)
+        encoded = Bidirectional(LSTM(lstm_units, return_sequences=True, activation=activation))(masked)
     encoded = Dropout(dropout_rate)(encoded)
     encoded = Bidirectional(LSTM(lstm_units_2, return_sequences=False, activation=activation))(encoded)
     encoded_latent = Dense(embedding_size, activation=activation)(encoded)
@@ -294,8 +300,8 @@ def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
         print("Transformer model is not implemented yet.")
         sys.exit(1)
 
-# Define the objective function for Optuna optimization - with pruning
-def optuna_objective_pruning_parallel(max_length, architecture, epoch, trial, X_train, X_val):
+# Define the objective function for Optuna optimization - with pruning and parallelization
+def optuna_objective_pruning_parallel(max_length, architecture, epoch, trial, gpu, nomasking, X_train, X_val):
     # Hyperparameters to be tuned
 
     # Learning rate
@@ -335,22 +341,42 @@ def optuna_objective_pruning_parallel(max_length, architecture, epoch, trial, X_
     # Build and compile the autoencoder
     if architecture == 'bilstm':
         
-        autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation)
-        autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
+        if gpu:
+            with tf.device("/GPU:0"): 
+                autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation, nomasking)
+                autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
 
-        # Train the model
-        for step in range(epoch):
-            autoencoder.fit(X_train, X_train, epochs=1, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
+                # Train the model
+                for step in range(epoch):
+                    autoencoder.fit(X_train, X_train, epochs=1, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
 
-            # Return validation loss
-            val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+                    # Return validation loss
+                    val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
 
-            # Report intermediate value for this epoch
-            trial.report(val_loss, step)
+                    # Report intermediate value for this epoch
+                    trial.report(val_loss, step)
 
-            # Check if this trial should be pruned
-            if trial.should_prune():
-                raise optuna.TrialPruned()
+                    # Check if this trial should be pruned
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
+        else:
+            with tf.device('/CPU:0'):
+                autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation, nomasking)
+                autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
+
+                # Train the model
+                for step in range(epoch):
+                    autoencoder.fit(X_train, X_train, epochs=1, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
+
+                    # Return validation loss
+                    val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+
+                    # Report intermediate value for this epoch
+                    trial.report(val_loss, step)
+
+                    # Check if this trial should be pruned
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
             
         return val_loss
 
@@ -582,7 +608,9 @@ def main():
     hyperopt_parser.add_argument('--storage', type=str, default=None, help="Database URL for Optuna. (default='None'). If you're running experiments that you don't wish to persist, consider using Optuna's in-memory storage: 'sqlite:///:memory:', otherwise select a db name: 'sqlite:///ntEmbd_optuna.db' for exsample.")
     hyperopt_parser.add_argument('--save_dir', type=str, default='optuna', help='Directory to save the Optuna study object.')
     hyperopt_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
-
+    hyperopt_parser.add_argument('--gpu', action='store_true', help='Use GPU for training if available.')
+    hyperopt_parser.add_argument('--nomasking', action='store_true', help='Disable masking of padded values.')
+    
     # Embed subparser
     embed_parser = subparsers.add_parser('embed', help='Generate embeddings using a pre-trained model.')
     embed_parser.add_argument('input_fasta', type=str, help='Path to the input FASTA file for generating embeddings.')
@@ -717,7 +745,7 @@ def main():
             loss = angular_distance_tf
             
         # Build and compile the model (either with optimized or default hyperparameters)
-        autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation)
+        autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation, args.nomasking)
         autoencoder.compile(optimizer=optimizer, loss=loss)
         autoencoder.summary()
 
@@ -764,6 +792,8 @@ def main():
     
     elif args.mode == 'hyperopt':
 
+        start_time = time.time()
+
         kf = KFold(n_splits=5, shuffle=True, random_state=args.seed)  # Using 5-fold cross-validation
 
         sampler = optuna_get_sampler(args.sampler)
@@ -791,7 +821,7 @@ def main():
                 study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, study_name=f"fold_{fold_num}")
             else:
                 study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, storage=storage_name, study_name=f"fold_{fold_num}", load_if_exists=True)
-            study.optimize(lambda trial: optuna_objective_pruning_parallel(args.max_length, args.arch, args.epochs, trial, X_train, X_val), n_trials=n_trials)
+            study.optimize(lambda trial: optuna_objective_pruning_parallel(args.max_length, args.arch, args.epochs, trial, args.gpu, args.nomasking, X_train, X_val), n_trials=n_trials)
 
             # Append best loss and hyperparameters for this fold
             validation_losses.append(study.best_value)
@@ -801,6 +831,10 @@ def main():
             plot_param_importances(study).show()
             plot_param_importances(study, target=lambda t: t.duration.total_seconds(), target_name="duration")
         
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Elapsed time: {elapsed_time:.2f} seconds")
+
         # Compute average and standard deviation of validation losses
         average_loss = np.mean(validation_losses)
         std_loss = np.std(validation_losses)
