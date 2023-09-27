@@ -17,11 +17,51 @@ import optuna
 from optuna.visualization import plot_optimization_history, plot_param_importances
 import matplotlib.pyplot as plt
 
+from keras.callbacks import Callback
+
 PYTHON_VERSION = sys.version_info
 VERSION = "0.9"
 PRORAM = "ntEmbd"
 AUTHOR = "Saber Hafezqorani (UBC & BCGSC)"
 CONTACT = "shafezqorani@bcgsc.ca"
+
+# To use the callback during training, instantiate it with the validation data and 
+# then add it to the `callbacks` list of the `fit` method:
+# gradient_monitor = GradientMonitor(validation_data=(X_val, Y_val))
+# model.fit(X_train, Y_train, callbacks=[gradient_monitor])
+# This is experimental and not used in the main code.
+class GradientMonitor(Callback):
+    def __init__(self, validation_data, *args, **kwargs):
+        super(GradientMonitor, self).__init__(*args, **kwargs)
+        self.val_data = (tf.convert_to_tensor(validation_data[0]), 
+                         tf.convert_to_tensor(validation_data[1]))
+    
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        
+        # List to store the average gradient norms for each layer
+        avg_grad_norms = []
+        
+        # Using GradientTape to compute gradients
+        with tf.GradientTape() as tape:
+            # Forward pass
+            preds = self.model(self.val_data[0], training=True)
+            # Compute loss value
+            loss_value = self.model.compiled_loss(self.val_data[1], preds)
+        
+        # Compute gradients
+        grads = tape.gradient(loss_value, self.model.trainable_weights)
+        
+        for grad, weight in zip(grads, self.model.trainable_weights):
+            # Compute the average gradient norm for the current layer
+            norm = tf.norm(grad).numpy()
+            avg_norm = norm / np.prod(weight.shape)
+            avg_grad_norms.append(avg_norm)
+        
+        # Log the average gradient norms
+        for i, avg_norm in enumerate(avg_grad_norms):
+            logs[f"avg_grad_norm_{i}"] = avg_norm
+            print(f"Layer {i} - Average Gradient Norm: {avg_norm:.5f}")
 
 # A function to set the random seed for reproducibility
 def reset_seeds(seed):
@@ -830,15 +870,15 @@ def main():
             #plot_optimization_history(study).show()
             plot_param_importances(study).show()
             plot_param_importances(study, target=lambda t: t.duration.total_seconds(), target_name="duration")
-        
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
         # Compute average and standard deviation of validation losses
         average_loss = np.mean(validation_losses)
         std_loss = np.std(validation_losses)
         print(f"Average validation loss: {average_loss:.4f} ± {std_loss:.4f}")
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
         # Save the best hyperparameters of each fold
         with open(args.save_dir + f"best_hyperparameters.txt", "w") as f:
@@ -854,6 +894,9 @@ def main():
             f.write("Best hyperparameters across folds:\n")
             for key, value in best_hyperparameters_total.items():
                 f.write(str(key) + ': ' + str(value) + '\n')
+            f.write('---- \n')
+            f.write(f"Average validation loss: {average_loss:.4f} ± {std_loss:.4f}\n")
+            f.write(f"Elapsed time: {elapsed_time:.2f} seconds\n")
 
     elif args.mode == 'embed':
         # call embedding function
