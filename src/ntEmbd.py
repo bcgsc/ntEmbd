@@ -286,7 +286,7 @@ def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, d
     return autoencoder, embedding_model
 
 # Define the objective function for Optuna optimization
-def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
+def optuna_objective(max_length, architecture, epoch, trial, gpu, nomasking, X_train, X_val):
     # Hyperparameters to be tuned
 
     # Learning rate
@@ -325,15 +325,28 @@ def optuna_objective(max_length, architecture, epoch, trial, X_train, X_val):
 
     # Build and compile the autoencoder
     if architecture == 'bilstm':
-        
-        autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation)
-        
-        # Train the model
-        autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
-        autoencoder.fit(X_train, X_train, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
 
-        # Return validation loss
-        val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+        if gpu:
+            with tf.device("/GPU:0"):
+                autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation, nomasking)
+                autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
+
+                # Train the model
+                autoencoder.fit(X_train, X_train, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
+
+                # Return validation loss
+                val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+        else:
+            with tf.device('/CPU:0'):
+                autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_size, dropout_rate, activation, nomasking)
+                autoencoder.compile(optimizer=optimizer, loss=angular_distance_tf)
+
+                # Train the model
+                autoencoder.fit(X_train, X_train, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(X_val, X_val), verbose=0)
+
+                # Return validation loss
+                val_loss = autoencoder.evaluate(X_val, X_val, verbose=0)
+        
         return val_loss
 
     elif architecture == 'transformer':
@@ -630,6 +643,7 @@ def main():
     train_parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate for regularization.')
     train_parser.add_argument('--lstm_units', type=int, default=256, help='Number of units in the LSTM layer.')
     train_parser.add_argument('--activation', choices=['relu', 'tanh', 'sigmoid'], default='relu', help='Activation function (default: relu)')
+    train_parser.add_argument('--nomasking', action='store_true', help='Disable masking of padded values.')
 
     # Analyze input sequences subparser
     analyze_parser = subparsers.add_parser('analyze', help='Analyze the input sequences.')
@@ -738,7 +752,7 @@ def main():
 
                 # Initialize Optuna study
                 study = optuna.create_study(direction="minimize", study_name=f"fold_{fold_num}")
-                study.optimize(lambda trial: optuna_objective(args.max_length, args.arch, args.optuna_epoch, trial, X_train, X_val), n_trials=n_trials)
+                study.optimize(lambda trial: optuna_objective(args.max_length, args.arch, args.optuna_epoch, trial, args.gpu, args.nomasking, X_train, X_val), n_trials=n_trials)
 
                 # Append best loss and hyperparameters for this fold
                 validation_losses.append(study.best_value)
