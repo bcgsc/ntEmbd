@@ -42,4 +42,4 @@ We believe that ntEmbd has the potential to be a valuable tool for other sequenc
 
 ## Youtube video
 
-[![ntEmbd on Youtube](https://img.youtube.com/vi/nToreGP8Jd8/0.jpg)](https://www.youtube.com/watch?v=nToreGP8Jd8)
+[![ntEmbd on Youtube](https://img.youtube.com/vi/nToreGP8Jd8/0.jpg)](https://www.youtube.com/watch?v=cevepibRu8I)
