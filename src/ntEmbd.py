@@ -21,7 +21,7 @@ from keras.callbacks import Callback
 
 PYTHON_VERSION = sys.version_info
 VERSION = "0.9"
-PRORAM = "ntEmbd"
+PROGRAM = "ntEmbd"
 AUTHOR = "Saber Hafezqorani (UBC & BCGSC)"
 CONTACT = "shafezqorani@bcgsc.ca"
 
