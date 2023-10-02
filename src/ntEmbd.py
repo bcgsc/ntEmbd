@@ -285,24 +285,57 @@ def build_bilstm_autoencoder(seq_len, embedding_size, feature_dim, lstm_units, d
 
     return autoencoder, embedding_model
 
+# suggest optuna hyperparameters ranges
+def suggest_optuna_search_space(data):
+    x, y, z = data.shape
+
+    # Embedding size: Suggest 3 values between 5% to 25% of the sequence length (y)
+    min_embedding = int(y * 0.05)
+    max_embedding = int(y * 0.25)
+    embedding_step = (max_embedding - min_embedding) // 2
+    embedding_sizes = list(range(min_embedding, max_embedding + 1, embedding_step))
+
+    # LSTM units: Suggest 3 values between 25% to 75% of the sequence length (y)
+    min_lstm = int(y * 0.25)
+    max_lstm = int(y * 0.75)
+    lstm_step = (max_lstm - min_lstm) // 2
+    lstm_units = list(range(min_lstm, max_lstm + 1, lstm_step))
+
+    # Batch size: Suggest 3 values based on the number of sequences (x)
+    if x < 1000:
+        batch_sizes = [8, 16, 32]
+    elif x < 5000:
+        batch_sizes = [16, 32, 64]
+    else:
+        batch_sizes = [32, 64, 128]
+
+    return {
+        "embedding_sizes": embedding_sizes,
+        "lstm_units": lstm_units,
+        "batch_sizes": batch_sizes
+    }
+
 # Define the objective function for Optuna optimization
-def optuna_objective(max_length, architecture, epoch, trial, gpu, nomasking, X_train, X_val):
-    # Hyperparameters to be tuned
+def optuna_objective(max_length, architecture, epoch, trial, gpu, nomasking, ranges, X_train, X_val):
+    # Suggest a search space for some of the hyperparameters
+    embedding_sizes = ranges["embedding_sizes"]
+    lstm_units = ranges["lstm_units"]
+    batch_sizes = ranges["batch_sizes"]
 
     # Learning rate
     lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
 
     # Batch size
-    #batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
-    batch_size = trial.suggest_categorical("batch_size", [16, 32])
+    #batch_size = trial.suggest_categorical("batch_size", [16, 32])
+    batch_size = trial.suggest_categorical("batch_size", batch_sizes)
 
     # Number of units in the LSTM layer
-    lstm_size = trial.suggest_categorical('units', [256, 512])
-    #lstm_size = trial.suggest_categorical('units', [32, 64, 128])
+    #lstm_size = trial.suggest_categorical('units', [256, 512])
+    lstm_size = trial.suggest_categorical('units', lstm_units)
 
     # Latent dimension (embedding size)
-    embedding_size = trial.suggest_categorical("latent_dim", [128, 256])
-    #embedding_size = trial.suggest_categorical("latent_dim", [20, 30, 40])
+    #embedding_size = trial.suggest_categorical("latent_dim", [128, 256])
+    embedding_size = trial.suggest_categorical("latent_dim", embedding_sizes)
 
     # Optimizer choice
     optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
@@ -354,23 +387,26 @@ def optuna_objective(max_length, architecture, epoch, trial, gpu, nomasking, X_t
         sys.exit(1)
 
 # Define the objective function for Optuna optimization - with pruning and parallelization
-def optuna_objective_pruning_parallel(max_length, architecture, epoch, trial, gpu, nomasking, X_train, X_val):
-    # Hyperparameters to be tuned
+def optuna_objective_pruning_parallel(max_length, architecture, epoch, trial, gpu, nomasking, ranges, X_train, X_val):
+    # Suggest a search space for some of the hyperparameters
+    embedding_sizes = ranges["embedding_sizes"]
+    lstm_units = ranges["lstm_units"]
+    batch_sizes = ranges["batch_sizes"]
 
     # Learning rate
     lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
 
     # Batch size
-    #batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
-    batch_size = trial.suggest_categorical("batch_size", [16, 32])
+    #batch_size = trial.suggest_categorical("batch_size", [16, 32])
+    batch_size = trial.suggest_categorical("batch_size", batch_sizes)
 
     # Number of units in the LSTM layer
-    lstm_size = trial.suggest_categorical('units', [256, 512])
-    #lstm_size = trial.suggest_categorical('units', [32, 64, 128])
+    #lstm_size = trial.suggest_categorical('units', [256, 512])
+    lstm_size = trial.suggest_categorical('units', lstm_units)
 
     # Latent dimension (embedding size)
-    embedding_size = trial.suggest_categorical("latent_dim", [128, 256])
-    #embedding_size = trial.suggest_categorical("latent_dim", [20, 30, 40])
+    #embedding_size = trial.suggest_categorical("latent_dim", [128, 256])
+    embedding_size = trial.suggest_categorical("latent_dim", embedding_sizes)
 
     # Optimizer choice
     optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
@@ -741,6 +777,8 @@ def main():
             sample_indices = np.random.choice(train_data.shape[0], size=int(train_data.shape[0] * 0.1), replace=False)
             sampled_data = train_data[sample_indices]
 
+            ranges = suggest_optuna_search_space(sampled_data)
+
             # Store validation losses and best hyperparameters
             validation_losses = []
             best_hyperparameters = []
@@ -752,7 +790,7 @@ def main():
 
                 # Initialize Optuna study
                 study = optuna.create_study(direction="minimize", study_name=f"fold_{fold_num}")
-                study.optimize(lambda trial: optuna_objective(args.max_length, args.arch, args.optuna_epoch, trial, args.gpu, args.nomasking, X_train, X_val), n_trials=n_trials)
+                study.optimize(lambda trial: optuna_objective(args.max_length, args.arch, args.optuna_epoch, trial, args.gpu, args.nomasking, ranges, X_train, X_val), n_trials=n_trials)
 
                 # Append best loss and hyperparameters for this fold
                 validation_losses.append(study.best_value)
@@ -861,6 +899,8 @@ def main():
         sample_indices = np.random.choice(train_data.shape[0], size=int(train_data.shape[0] * 0.1), replace=False)
         sampled_data = train_data[sample_indices]
 
+        ranges = suggest_optuna_search_space(sampled_data)
+
         # Store validation losses and best hyperparameters
         validation_losses = []
         best_hyperparameters = []
@@ -875,7 +915,7 @@ def main():
                 study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, study_name=f"fold_{fold_num}")
             else:
                 study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, storage=storage_name, study_name=f"fold_{fold_num}", load_if_exists=True)
-            study.optimize(lambda trial: optuna_objective_pruning_parallel(args.max_length, args.arch, args.epochs, trial, args.gpu, args.nomasking, X_train, X_val), n_trials=n_trials)
+            study.optimize(lambda trial: optuna_objective_pruning_parallel(args.max_length, args.arch, args.epochs, trial, args.gpu, args.nomasking, ranges, X_train, X_val), n_trials=n_trials)
 
             # Append best loss and hyperparameters for this fold
             validation_losses.append(study.best_value)
