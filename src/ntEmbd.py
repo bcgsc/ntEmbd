@@ -230,6 +230,8 @@ def process_sequences(sequences, max_length, truncate_long_sequences, pad_positi
                 seq = seq[-max_length:]
             else:
                 continue  # Skip truncation and ignore this sequence
+        elif len(seq) == max_length:
+            pass
         else:
             if pad_position not in ["pre", "post"]:
                 continue # Skip padding and ignore this sequence
