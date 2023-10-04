@@ -837,26 +837,49 @@ def main():
             loss = angular_distance_tf
             
         # Build and compile the model (either with optimized or default hyperparameters)
-        autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation, args.nomasking)
-        autoencoder.compile(optimizer=optimizer, loss=loss)
-        autoencoder.summary()
+        if args.gpu:
+            with tf.device("/GPU:0"):
+                autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation, args.nomasking)
+                autoencoder.compile(optimizer=optimizer, loss=loss)
+                autoencoder.summary()
+                
+                # Save the model summary to a file
+                with open(save_dir + "model_summary.txt", "w") as f:
+                    autoencoder.summary(print_fn=lambda x: f.write(x + '\n'))
 
-        # Save the model summary to a file
-        with open(save_dir + "model_summary.txt", "w") as f:
-            autoencoder.summary(print_fn=lambda x: f.write(x + '\n'))
+                # Train the model using the whole training set and validate using the separate validation set
+                #train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
+                #val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
         
-        # Train the model using the whole training set and validate using the separate validation set
-        train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
-        val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
-        
-        # Introduce early stopping and model checkpoints
-        if args.early_stopping:
-            early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-            model_checkpoint = tf.keras.callbacks.ModelCheckpoint(save_dir + 'best_model.h5', monitor='val_loss', save_best_only=True)
-            history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
+                # Introduce early stopping and model checkpoints
+                if args.early_stopping:
+                    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+                    model_checkpoint = tf.keras.callbacks.ModelCheckpoint(save_dir + 'best_model.h5', monitor='val_loss', save_best_only=True)
+                    history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
+                else:
+                    history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
         else:
-            history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
+            with tf.device('/CPU:0'):
+                autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation, args.nomasking)
+                autoencoder.compile(optimizer=optimizer, loss=loss)
+                autoencoder.summary()
+
+                # Save the model summary to a file
+                with open(save_dir + "model_summary.txt", "w") as f:
+                    autoencoder.summary(print_fn=lambda x: f.write(x + '\n'))
         
+                # Train the model using the whole training set and validate using the separate validation set
+                #train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
+                #val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
+  
+                # Introduce early stopping and model checkpoints
+                if args.early_stopping:
+                    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+                    model_checkpoint = tf.keras.callbacks.ModelCheckpoint(save_dir + 'best_model.h5', monitor='val_loss', save_best_only=True)
+                    history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
+                else:
+                    history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
+                
         # Plot the training history and save it to a file in the log directory
         with open(save_dir + "training_history.txt", "w") as f:
             f.write(str(history.history))
