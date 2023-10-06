@@ -205,12 +205,13 @@ def iupac_encoding(seq):
     return np.array(encoded_sequence)
 
 # pre-process sequences for training
-def process_sequences(sequences, max_length, truncate_long_sequences, pad_position, padding_value=(-1, -1, -1, -1)):
+def process_sequences(sequences, min_length, max_length, truncate_long_sequences, pad_position, padding_value=(-1, -1, -1, -1)):
     """
     Process raw sequences: filter based on length, encode, and then pad/truncate.
 
     Parameters:
     - sequences: List of raw sequences (strings)
+    - min_length: Minimum length for each sequence to be considered
     - max_length: The desired length for each sequence after padding/truncating
     - truncate_long_sequences: Whether to truncate sequences longer than max_length
     - padding_value: The value used for padding (default is [-1, -1, -1, -1])
@@ -223,7 +224,9 @@ def process_sequences(sequences, max_length, truncate_long_sequences, pad_positi
     processed_sequences = []
 
     for seq in sequences:
-        if len(seq) > max_length:
+        if len(seq) < min_length:
+            continue  # Skip sequences that are too short
+        elif len(seq) > max_length:
             if truncate_long_sequences == "truncate_end":
                 seq = seq[:max_length]
             elif truncate_long_sequences == "truncate_start":
@@ -671,6 +674,7 @@ def main():
     train_parser.add_argument('--seed', type=int, default=192, help='Random seed for reproducibility.')
     train_parser.add_argument('--padding', type=str, choices=['pre', 'post', 'ignore'], default='post', help='Choose the padding position: "pre" for start and "post" for end.')
     train_parser.add_argument('--max_length', type=int, default=1000, help='Maximum length of sequences to be considered. Default is 1000 base pairs.')
+    train_parser.add_argument('--min_length', type=int, default=0, help='Minimum length of sequences to be considered. Default is 0 base pairs.')
     train_parser.add_argument('--long_seq', type=str, choices=['truncate_start', 'truncate_end', 'ignore'], default='ignore', help='How to handle sequences longer than max_length: "truncate" or "ignore". Default is "truncate".')
     train_parser.add_argument('--arch', choices=['bilstm', 'transformer'], default='bilstm', help='Model architecture (default: bilstm)')
     train_parser.add_argument('--loss', choices=['angular_distance', 'mse'], default='angular_distance', help='Loss function (default: angular_distance)')
@@ -753,7 +757,7 @@ def main():
                     all_sequences.append(seqS)
 
         # pre-process sequences for training
-        processed_sequences = process_sequences(all_sequences, args.max_length, args.long_seq, args.padding, padding_value=(-1, -1, -1, -1))
+        processed_sequences = process_sequences(all_sequences, args.min_length, args.max_length, args.long_seq, args.padding, padding_value=(-1, -1, -1, -1))
         processed_sequences_array = np.array(processed_sequences)
 
         #Splitting the data and setting up cross-validation
