@@ -768,7 +768,7 @@ def main():
         if args.save_model:
             save_dir = os.path.abspath(args.save_model)
         else:
-            save_dir = os.path.abspath(args.input_fasta[0])
+            save_dir = os.path.dirname(args.input_fasta[0]) + "/"
 
         np.save(save_dir + "train_data.npy", train_data)
         np.save(save_dir + "val_data.npy", val_data)
