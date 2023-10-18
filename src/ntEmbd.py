@@ -864,6 +864,22 @@ def main():
                     history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping, model_checkpoint])
                 else:
                     history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
+                
+                # Plot the training history and save it to a file in the log directory
+                with open(save_dir + "training_history.txt", "w") as f:
+                    f.write(str(history.history))
+
+                plot_and_save_training_history(history, save_dir)
+                
+                # Compute validation loss and print it
+                val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
+                print(f"Validation loss: {val_loss:.4f}")
+
+                # Save the embeddings if --save_embeddings is enabled
+                if args.save_embeddings:
+                    # Generate embeddings for the training data
+                    train_embeddings = embedding_model.predict(train_data)
+                    np.savetxt(save_dir + "train_embeddings.tsv", train_embeddings, delimiter='\t')
         else:
             with tf.device('/CPU:0'):
                 autoencoder, embedding_model = build_bilstm_autoencoder(args.max_length, embedding_size, 4, lstm_units, dropout_rate, activation, args.nomasking)
@@ -886,21 +902,21 @@ def main():
                 else:
                     history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
                 
-        # Plot the training history and save it to a file in the log directory
-        with open(save_dir + "training_history.txt", "w") as f:
-            f.write(str(history.history))
+                # Plot the training history and save it to a file in the log directory
+                with open(save_dir + "training_history.txt", "w") as f:
+                    f.write(str(history.history))
 
-        plot_and_save_training_history(history, save_dir)
-        
-        # Compute validation loss and print it
-        val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
-        print(f"Validation loss: {val_loss:.4f}")
+                plot_and_save_training_history(history, save_dir)
+                
+                # Compute validation loss and print it
+                val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
+                print(f"Validation loss: {val_loss:.4f}")
 
-        # Save the embeddings if --save_embeddings is enabled
-        if args.save_embeddings:
-            # Generate embeddings for the training data
-            train_embeddings = embedding_model.predict(train_data)
-            np.savetxt(save_dir + "train_embeddings.tsv", train_embeddings, delimiter='\t')
+                # Save the embeddings if --save_embeddings is enabled
+                if args.save_embeddings:
+                    # Generate embeddings for the training data
+                    train_embeddings = embedding_model.predict(train_data)
+                    np.savetxt(save_dir + "train_embeddings.tsv", train_embeddings, delimiter='\t')
 
     elif args.mode == 'analyze':
         # Analyze the input sequences
