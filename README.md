@@ -10,7 +10,7 @@ Embeddings refer to numerical representations of concepts that are converted int
 
 ![embedding](assets/merged_gif_RNA.gif)
 
-## How ntEmbd words?
+## How ntEmbd works?
 ntEmbd is a deep learning embedding method that generates compressed and informative representations for nucleotide sequences. It employs an autoencoder architecture consisting of two main components, an encoder and a decoder:
 
 <br/>The **_encoder_** component of the model takes the input nucleotide sequence and compresses it into a lower-dimensional representation.
