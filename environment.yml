@@ -1,0 +1,6 @@
+name: ntembd
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+prefix: /Users/saberhq/miniconda3/envs/ntembd
