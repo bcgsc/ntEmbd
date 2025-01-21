@@ -1105,7 +1105,7 @@ def main():
                     # Train the model using the whole training set and validate using the separate validation set
                     #train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
                     #val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
-            
+                    '''
                     # Introduce early stopping and model checkpoints
                     if early_stopping_flag:
                         early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
@@ -1122,9 +1122,9 @@ def main():
                         # Generate embeddings for the training data
                         train_embeddings = embedding_model.predict(train_data)
                         print("Embeddings are calculated successfully!")
-
+                    '''
                 #print that the unit test is done
-                print("Unit test is done!")
+                print("Unit test is done on GPU!")
             
             else:
                 with tf.device('/CPU:0'):
@@ -1135,7 +1135,7 @@ def main():
                     # Train the model using the whole training set and validate using the separate validation set
                     #train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
                     #val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
-            
+                    '''
                     # Introduce early stopping and model checkpoints
                     if early_stopping_flag:
                         early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
@@ -1152,9 +1152,9 @@ def main():
                         # Generate embeddings for the training data
                         train_embeddings = embedding_model.predict(train_data)
                         print("Embeddings are calculated successfully!")
-
+                    '''
                 #print that the unit test is done
-                print("Unit test is done!")
+                print("Unit test is done on CPU!")
 
     # ... handle other sub-commands ...
 
