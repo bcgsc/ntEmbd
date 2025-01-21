@@ -1,0 +1,9 @@
+numpy
+tensorflow
+torch
+torchvision
+optuna
+matplotlib
+scikit-learn
+argparse
+
