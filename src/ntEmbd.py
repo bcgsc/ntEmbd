@@ -734,6 +734,12 @@ def main():
     info_parser = subparsers.add_parser('info', help='Get information about a trained model.')
     info_parser.add_argument('model_path', type=str, help='Path to the trained model.')
 
+    # Unit test subparser
+    unit_test_parser = subparsers.add_parser('unit-test', help='Run unit tests.')
+    unit_test_parser.add_argument('--cpu', action='store_true', help='Run unit tests on CPU.')
+    unit_test_parser.add_argument('--gpu', action='store_true', help='Run unit tests on GPU.')
+    unit_test_parser.add_argument('--tf', action='store_true', help='Run a simple training on TensorFlow.')
+
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
@@ -1000,6 +1006,155 @@ def main():
     elif args.mode == 'embed':
         # call embedding function
         pass
+
+    elif args.mode == 'unit-test':
+
+        # Run the unit tests - training the model
+        if args.tf:
+            if args.gpu:
+                # Record time
+                start_time = time.time()
+                with tf.device("/device:GPU:0"):
+                    cifar = tf.keras.datasets.cifar100
+                    (x_train, y_train), (x_test, y_test) = cifar.load_data()
+                    model = tf.keras.applications.ResNet50(
+                        include_top=True,
+                        weights=None,
+                        input_shape=(32, 32, 3),
+                        classes=100,)
+
+                    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+                    model.compile(optimizer="adam", loss=loss_fn, metrics=["accuracy"])
+                    model.fit(x_train, y_train, epochs=2, batch_size=128)
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Elapsed time: {elapsed_time:.2f} seconds")
+            else:
+                start_time = time.time()
+                with tf.device('/CPU:0'):
+                    cifar = tf.keras.datasets.cifar100
+                    (x_train, y_train), (x_test, y_test) = cifar.load_data()
+                    model = tf.keras.applications.ResNet50(
+                        include_top=True,
+                        weights=None,
+                        input_shape=(32, 32, 3),
+                        classes=100,)
+
+                    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+                    model.compile(optimizer="adam", loss=loss_fn, metrics=["accuracy"])
+                    model.fit(x_train, y_train, epochs=2, batch_size=128)
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Elapsed time: {elapsed_time:.2f} seconds")
+        else:
+        
+            # pre define variables
+            seed = 192
+            input_fastas = ["./sample_data/sub1k.fa"]
+            min_length = 0
+            max_length = 500
+            long_seq = 'truncate_end'
+            padding = 'post'
+            embedding_size = 128
+            lstm_units = 256
+            dropout_rate = 0.2
+            activation = 'relu'
+            nomasking = False
+            epoch = 20
+            batch_size = 16
+            optimizer = 'adam'
+            optimizer_choice = optimizer
+            if optimizer_choice == "adam":
+                if is_mac_arm64:
+                    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=0.001)
+                else:
+                    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+            elif optimizer_choice == "sgd":
+                if is_mac_arm64:
+                    optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=0.001)
+                else:
+                    optimizer = tf.keras.optimizers.SGD(learning_rate=0.001)
+
+            loss = angular_distance_tf
+            early_stopping_flag = True
+            save_embeddings = False
+
+            reset_seeds(seed)
+
+            all_sequences = []
+            for fasta_file in input_fastas:
+                with open(fasta_file, 'rt') as f:
+                    for seqN, seqS, seqQ in readfq(f):
+                        all_sequences.append(seqS)
+
+            # pre-process sequences for training
+            processed_sequences = process_sequences(all_sequences, min_length, max_length, long_seq, padding, padding_value=(-1, -1, -1, -1))
+            processed_sequences_array = np.array(processed_sequences)
+
+            #Splitting the data and setting up cross-validation
+            train_val_data, test_data = train_test_split(processed_sequences_array, test_size=0.20, random_state=seed)
+            train_data, val_data = train_test_split(train_val_data, test_size=0.25, random_state=seed)
+
+            if args.gpu:
+                with tf.device("/GPU:0"):
+                    autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_units, dropout_rate, activation, nomasking)
+                    autoencoder.compile(optimizer=optimizer, loss=loss)
+                    autoencoder.summary()
+
+                    # Train the model using the whole training set and validate using the separate validation set
+                    #train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
+                    #val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
+            
+                    # Introduce early stopping and model checkpoints
+                    if early_stopping_flag:
+                        early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+                        history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping])
+                    else:
+                        history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
+                    
+                    # Compute validation loss and print it
+                    val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
+                    print(f"Validation loss: {val_loss:.4f}")
+
+                    # Save the embeddings if --save_embeddings is enabled
+                    if save_embeddings:
+                        # Generate embeddings for the training data
+                        train_embeddings = embedding_model.predict(train_data)
+                        print("Embeddings are calculated successfully!")
+
+                #print that the unit test is done
+                print("Unit test is done!")
+            
+            else:
+                with tf.device('/CPU:0'):
+                    autoencoder, embedding_model = build_bilstm_autoencoder(max_length, embedding_size, 4, lstm_units, dropout_rate, activation, nomasking)
+                    autoencoder.compile(optimizer=optimizer, loss=loss)
+                    autoencoder.summary()
+
+                    # Train the model using the whole training set and validate using the separate validation set
+                    #train_data = tf.convert_to_tensor(train_data, dtype=tf.float32)
+                    #val_data = tf.convert_to_tensor(val_data, dtype=tf.float32)
+            
+                    # Introduce early stopping and model checkpoints
+                    if early_stopping_flag:
+                        early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+                        history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data), callbacks=[early_stopping])
+                    else:
+                        history = autoencoder.fit(train_data, train_data, epochs=epoch, batch_size=batch_size, shuffle=True, validation_data=(val_data, val_data))
+                    
+                    # Compute validation loss and print it
+                    val_loss = autoencoder.evaluate(val_data, val_data, verbose=0)
+                    print(f"Validation loss: {val_loss:.4f}")
+
+                    # Save the embeddings if --save_embeddings is enabled
+                    if save_embeddings:
+                        # Generate embeddings for the training data
+                        train_embeddings = embedding_model.predict(train_data)
+                        print("Embeddings are calculated successfully!")
+
+                #print that the unit test is done
+                print("Unit test is done!")
+
     # ... handle other sub-commands ...
 
     else:
