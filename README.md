@@ -25,7 +25,7 @@ During the training process, the model learns to minimize the difference between
 The learned representations (embeddings) can be used in various downstream tasks. Here we demonstrate the power of ntEmbd on several bioinformatics applications:
 
 ### Coding Potentail Assessment
-Using the ntEmbd-generated representations of the RNA sequences and their labels based on the GENCODE biotype classes, we train four supervised classifiers (MLP, Random Forest, KNN, and Gradient Boosting) and utilized an ensemble approach to distinguish coding vs. noncoding transcripts. Our classifier achieved an accuracy of 0.88 on the mRNN-challenge dataset, outperforming five other predictors: RNASamba1 (0.83), mRNN2 (0.87), CPAT3 (0.73), CPC24 (0.69), and FEELnc5 (0.78).
+Using the ntEmbd-generated representations of the RNA sequences and their labels based on the GENCODE biotype classes, we train four supervised classifiers (MLP, Random Forest, KNN, and Gradient Boosting) and utilized an ensemble approach to distinguish coding vs. noncoding transcripts. Our classifier achieved an accuracy of 0.88 on the mRNN-challenge dataset, outperforming five other predictors: RNASamba (0.83), mRNN (0.87), CPAT (0.73), CPC2 (0.69), and FEELnc (0.78).
 
 ![embedding](assets/coding%20vs%20noncoding%20analysis.png)
 
